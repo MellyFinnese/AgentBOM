@@ -67,10 +67,18 @@ impl SecurityGraph {
     }
 
     pub fn reachable(&self, start: &str, max_depth: usize) -> Vec<Vec<String>> {
-        self.reachable_limited(start, max_depth, usize::MAX)
+        self.reachable_limited_mode(start, max_depth, usize::MAX, "can")
     }
 
     pub fn reachable_limited(&self, start: &str, max_depth: usize, max_paths: usize) -> Vec<Vec<String>> {
+        self.reachable_limited_mode(start, max_depth, max_paths, "can")
+    }
+
+    /// Traverse only relationships supported by the requested evidence state.
+    /// Missing state is treated as `can` for backwards compatibility. A `did` edge
+    /// is evidence of observed execution; it can be queried explicitly without
+    /// contaminating declared/authority reachability analysis.
+    pub fn reachable_limited_mode(&self, start: &str, max_depth: usize, max_paths: usize, mode: &str) -> Vec<Vec<String>> {
         if !self.nodes.contains_key(start) || max_paths == 0 {
             return Vec::new();
         }
@@ -79,7 +87,7 @@ impl SecurityGraph {
         while let Some((current, path)) = queue.pop_front() {
             if paths.len() >= max_paths || path.len().saturating_sub(1) >= max_depth { continue; }
             for edge in self.outgoing(&current) {
-                if path.contains(&edge.target) { continue; }
+                if !edge_supports_mode(edge, mode) || path.contains(&edge.target) { continue; }
                 let mut next = path.clone();
                 next.push(edge.target.clone());
                 paths.push(next.clone());
@@ -128,6 +136,17 @@ impl SecurityGraph {
     }
 }
 
+fn edge_supports_mode(edge: &Edge, mode: &str) -> bool {
+    let state = edge.properties.get("evidence_state").and_then(|v| v.as_str()).unwrap_or("can").to_ascii_lowercase();
+    match mode.to_ascii_lowercase().as_str() {
+        "can" => state != "should" && state != "did_only",
+        "did" => state == "did" || state == "observed",
+        "should" => state == "should",
+        "all" => true,
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GraphDiff {
     pub added_nodes: Vec<Node>,
@@ -169,6 +188,17 @@ mod tests {
         graph.add_edge(Edge { source: "b".into(), kind: "r".into(), target: "d".into(), properties: serde_json::json!({}) }).unwrap();
         graph.add_edge(Edge { source: "c".into(), kind: "r".into(), target: "d".into(), properties: serde_json::json!({}) }).unwrap();
         assert_eq!(graph.reachable_limited("a", 3, 2).len(), 2);
+    }
+
+    #[test]
+    fn graph_separates_can_did_and_should_edges() {
+        let mut graph = SecurityGraph::default();
+        for id in ["a", "b", "c"] { graph.add_node(node(id, "node", id)).unwrap(); }
+        graph.add_edge(Edge { source: "a".into(), kind: "accesses".into(), target: "b".into(), properties: serde_json::json!({"evidence_state":"did"}) }).unwrap();
+        graph.add_edge(Edge { source: "a".into(), kind: "would_access".into(), target: "c".into(), properties: serde_json::json!({"evidence_state":"should"}) }).unwrap();
+        assert_eq!(graph.reachable_limited_mode("a", 2, 10, "did").len(), 1);
+        assert_eq!(graph.reachable_limited_mode("a", 2, 10, "should").len(), 1);
+        assert_eq!(graph.reachable_limited_mode("a", 2, 10, "can").len(), 1);
     }
 
     #[test]
