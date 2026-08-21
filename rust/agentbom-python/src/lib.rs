@@ -30,6 +30,10 @@ impl NativeGraph {
         }.map_err(pyo3::exceptions::PyValueError::new_err)?;
         serde_json::to_string(&model).map_err(pyo3::exceptions::PyValueError::new_err)
     }
+    fn parse_mcp_tools_json(&self, payload: String) -> PyResult<String> {
+        serde_json::to_string(&agentbom_engine::McpGateway::parse_tools_list(&payload).map_err(pyo3::exceptions::PyValueError::new_err)?)
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
     fn monitor_runtime_json(&self, declared_json: String, events_json: String) -> PyResult<String> {
         let declared: Vec<String> = serde_json::from_str(&declared_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
         let events: Vec<RuntimeEvent> = serde_json::from_str(&events_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
