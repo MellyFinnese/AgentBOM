@@ -23,9 +23,9 @@ AgentBOM is **Rust-first**. The security engine is implemented once in native Ru
 
 `agentbom-core` contains graph primitives. `agentbom-engine` is the stable native API and owns graph traversal, authorization, delegation, policy, attack paths, blast radius, runtime correlation, attestations, and temporal drift. `agentbom-ffi` publishes the C ABI, `agentbom-python` exposes the same engine through PyO3, and `agentbom-wasm` exposes the analysis API to WebAssembly. Security-critical analysis is not maintained as a second Python implementation.
 
-## AgentBOM v1
+## AgentBOM v1: the format is independent of the tool
 
-AgentBOM is also a versioned interchange format, not only a CLI. The current schema is `1.0`:
+AgentBOM is a versioned interchange format, not only a CLI. The current schema is `1.0` and is designed so an independent implementation can produce documents without importing AgentBOM code.
 
 ```text
 AgentBOM v1
@@ -38,15 +38,41 @@ AgentBOM v1
 └── attestation
 ```
 
-Schema: `schema/agentbom-v1.schema.json`
+Canonical schema: `schema/agentbom-v1.schema.json`  
+Schema contract: `schema/README.md`  
+Schema changelog: `schema/CHANGELOG.md`  
+Specification: `docs/AGENTBOM-V1.md`  
+Governance/RFC process: `GOVERNANCE.md`
 
-Specification: `docs/AGENTBOM-V1.md`
-
-Generate a portable AgentBOM document:
+Validate a document produced by any implementation:
 
 ```bash
-agentbom spec ./mcp.json --output agentbom.json
+agentbom validate third-party-agentbom.json
 ```
+
+Consume and re-emit a validated document without using internal graph classes:
+
+```bash
+agentbom ingest third-party-agentbom.json > normalized.json
+```
+
+The repository includes a Go-style third-party producer fixture at `examples/spec/go-producer/agentbom.json`; CI validates it against the canonical schema.
+
+## Distribution and CI
+
+A GitHub Action is included at `.github/workflows/agentbom-scan.yml` for a drop-in CI security scan. It validates the format and emits SARIF for GitHub code scanning.
+
+```bash
+agentbom sarif ./target --output agentbom.sarif
+```
+
+Prebuilt Python/native wheels are produced for common Linux, macOS, and Windows targets by `.github/workflows/release.yml` on version tags.
+
+## Public correctness corpus
+
+`corpus/` contains versioned golden security cases and safe controls. The project uses this corpus to make detection behavior explainable and regression-testable. See `corpus/README.md`.
+
+Threat-model and detection boundaries are documented in `docs/THREAT-MODEL.md`.
 
 ## Current vertical slice
 
@@ -60,6 +86,16 @@ agentbom scan ./mcp.json --behavior-events events.json --fail-on-risk
 agentbom scan ./mcp.json --save-baseline .agentbom/baseline.json
 agentbom scan ./mcp.json --compare-baseline .agentbom/baseline.json
 ```
+
+### MCP capability discovery
+
+Parse a real captured `tools/list` response into normalized tool definitions:
+
+```bash
+agentbom mcp-discover tools-list.json --output agentbom-tools.json
+```
+
+The MCP gateway can then use the definitions to resolve action/resource context automatically before policy evaluation.
 
 ### Provider authorization
 
@@ -103,100 +139,24 @@ Correlate that authority with tools, permissions, and reachable resources:
 agentbom attack-paths ./mcp.json agent-a --findings
 ```
 
-This exposes transitive authority and shows the full graph path behind a risky finding.
-
-### Runtime behavior correlation
-
-Compare observed runtime events against the effective security graph:
+### Runtime behavior and enforcement
 
 ```bash
-agentbom behavior-check ./mcp.json events.json --findings
 agentbom behavior-check ./mcp.json events.json --fail-on-risk
+agentbom enforce ./mcp.json request.json --rules policy.json --audit
+agentbom mcp-gateway ./mcp.json request.json --tool-definitions agentbom-tools.json --rules policy.json --fail-on-deny
 ```
 
-Or include behavior correlation in a scan:
+The Rust engine distinguishes:
 
-```bash
-agentbom scan ./mcp.json --behavior-events events.json --fail-on-risk
-```
+- **CAN** — effective delegated authority and reachable resources.
+- **DID** — observed runtime behavior.
+- **SHOULD** — policy and enforcement decision.
 
-The Rust engine distinguishes between:
+## Interoperability
 
-- **Observed behavior that matches a reachable attack path**
-- **Observed behavior that cannot be explained by the current security graph**
-
-High and critical behavior findings can fail CI with `--fail-on-risk`.
-
-### Runtime, policy, graph, and attestation workflows
-
-```bash
-agentbom monitor events.json --declared declared.json
-agentbom cypher ./mcp.json
-agentbom policy-check write production-db --rules policy.json
-agentbom attest ./mcp.json --output attestation.json
-```
-
-The native Rust engine evaluates wildcard grants, production mutation authority, configuration-referenced credentials, dangerous tool capabilities, reachable high-impact resources, blast radius, graph drift, runtime anomalies, delegated authority, and observed runtime behavior.
-
-## Architecture
-
-```text
-                +------------------+
-                |    Discovery     |
-                +---------+--------+
-                          |
-                          v
-                +------------------+
-                |  Normalization    |
-                +---------+--------+
-                          |
-                          v
-                +-------------------------+
-                | Rust Security Engine     |
-                | graph / identity / auth  |
-                | delegation / policy      |
-                | paths / blast / drift    |
-                | runtime / behavior      |
-                | attestation             |
-                +-----------+-------------+
-                            |
-             +--------------+--------------+
-             |              |              |
-             v              v              v
-        Authorization      Evidence      Bindings
-             |                            |
-             v                   +--------+--------+
-        Attack Paths             |        |        |
-             |                Python     C ABI    WASM
-             v
-        Blast Radius
-             |
-             v
-       Runtime Correlation
-             |
-             v
-       Reporting / CI / Enforcement
-```
-
-## Design principles
-
-- **Rust-first:** one authoritative native implementation for security-critical analysis.
-- **Stable bindings:** C ABI for broad interoperability, PyO3 for Python ergonomics, and WebAssembly for portable embedding.
-- **Versioned format:** AgentBOM v1 defines a stable interchange document independent of the implementation language.
-- **Provider-neutral authorization:** cloud/IAM/OAuth/MCP permissions normalize into the same model.
-- **Delegation-aware:** effective authority is resolved across bounded delegation, assume, and impersonation relationships.
-- **Behavior-aware:** runtime activity is correlated against the modeled authority and attack graph.
-- **Domain-first:** the security model comes before integrations.
-- **Capability-aware:** capabilities and authorization are modeled explicitly.
-- **Authority-aware:** identity, credentials, permission grants, effects, conditions, and resource scope are first-class concepts.
-- **Runtime-aware:** observed state can be compared against declared authority.
-- **Temporal:** security changes are evaluated against verified baselines rather than raw text diffs.
-- **Evidence-backed:** discoveries retain source and provenance metadata.
-- **Graph-native:** relationships are part of the security model, not an enrichment step.
-- **Deterministic:** policy, path, blast-radius, reconciliation, delegation, behavior, snapshot, drift, and attestation operations are reproducible and bounded.
-- **Backend-neutral:** the engine can use JSON locally and can be extended to graph backends without changing the security model.
-- **Safe discovery:** configuration inspection and runtime discovery do not execute arbitrary agent or MCP code.
+AgentBOM intentionally avoids replacing established policy languages or IAM semantics where interoperability is useful. Provider permissions normalize into the AgentBOM authorization model, while future policy integrations can map to existing policy systems such as Cedar or OPA/Rego. The novel semantic layer is the relationship between agent capabilities, delegated authority, MCP tool execution, runtime observations, and attack paths.
 
 ## Status
 
-Early active development. The Rust-native graph engine, AgentBOM v1 schema, authorization/delegation model, provider adapter boundary, stable engine API, C FFI, PyO3 binding, WASM binding, discovery, policy, attack-path, blast-radius, runtime monitoring, behavior correlation, attestation, and temporal drift foundations are in place. Next major work is production-grade cloud/provider ingestion, concrete Memgraph/Neo4j persistence, continuous monitoring agents, enforcement adapters, and cryptographic attestation integrations.
+Early active development. The architecture and major native analysis foundations are in place. The immediate project priority is ecosystem validation: third-party producers/consumers, SARIF/CI adoption, a growing public golden corpus, independent review, and production-grade provider integrations.
