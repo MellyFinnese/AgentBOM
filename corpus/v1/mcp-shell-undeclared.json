@@ -1,0 +1,13 @@
+{
+  "case_id": "mcp-shell-undeclared",
+  "class": "vulnerable",
+  "description": "Agent exposes an MCP shell execution capability without a declared policy grant.",
+  "input": {
+    "agent": "coding-agent",
+    "tool": "shell",
+    "action": "execute",
+    "resource": "shell"
+  },
+  "expected_findings": ["AGENTBOM"],
+  "expected_behavior": "deny-or-review"
+}
