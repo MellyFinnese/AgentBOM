@@ -39,6 +39,8 @@ class RelationKind(StrEnum):
     CALLS = "calls"
     CONNECTS_TO = "connects_to"
     AUTHENTICATES_AS = "authenticates_as"
+    ASSUMES = "assumes"
+    DELEGATES = "delegates"
     GRANTS = "grants"
     ACCESSES = "accesses"
     READS = "reads"
