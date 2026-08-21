@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable
 
-from .domain import Entity, EntityKind, RelationKind
+from .domain import Entity, EntityKind
 from .graph import GraphStore
 from .path_analysis import BoundedPathAnalyzer
 
@@ -30,7 +30,7 @@ class PolicyFinding:
 
 DANGEROUS_OPERATIONS = {"execute", "delete", "assume_role", "admin", "write"}
 SENSITIVE_KEYWORDS = ("prod", "production", "secret", "credential", "database", "admin")
-WILDCARDS = {"*", "all", "any", "admin:*", "*:*")
+WILDCARDS = {"*", "all", "any", "admin:*", "*:*"}
 
 
 def analyze_policies(graph: GraphStore, *, max_depth: int = 8) -> tuple[PolicyFinding, ...]:
@@ -84,7 +84,7 @@ def _credential_exposure(graph: GraphStore) -> Iterable[PolicyFinding]:
         if credential.kind != EntityKind.CREDENTIAL:
             continue
         props = {str(key): str(value) for key, value in credential.properties.items()}
-        if props.get("secret") == "True" and props.get("source"):
+        if props.get("secret", "").lower() == "true" and props.get("source"):
             yield PolicyFinding(
                 "CRED-CONFIG-EXPOSED",
                 Severity.HIGH,
