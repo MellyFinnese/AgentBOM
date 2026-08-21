@@ -36,10 +36,11 @@ pub fn parse_aws_iam(payload: &str) -> Result<AuthorizationModel, String> {
     for (i, stmt) in policy.statements.into_iter().enumerate() {
         for action in strings(&stmt.action) {
             for resource in strings(&stmt.resource) {
+                let permission_id = stmt.sid.clone().unwrap_or_else(|| format!("aws-statement-{i}-{action}-{resource}"));
                 permissions.push(Permission {
-                    id: stmt.sid.clone().unwrap_or_else(|| format!("aws-statement-{i}-{action}-{resource}")),
+                    id: permission_id,
                     principal: principal(stmt.principal.as_ref()),
-                    action,
+                    action: action.clone(),
                     resource,
                     effect: if stmt.effect.eq_ignore_ascii_case("deny") { Effect::Deny } else { Effect::Allow },
                     conditions: stmt.condition.clone(),
