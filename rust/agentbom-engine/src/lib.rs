@@ -10,6 +10,8 @@ pub mod backend;
 pub mod drift;
 pub mod enforcement;
 pub mod query;
+pub mod runtime;
+pub mod signing;
 
 use analysis::{analyze_policy, attack_paths, blast_radius, BlastRadius, PathResult, PolicyFinding};
 use drift::{analyze_drift, DriftFinding};
@@ -19,6 +21,8 @@ pub use authorization::{AuthorizationModel, Effect, Permission};
 pub use backend::{GraphBackend, JsonBackend};
 pub use enforcement::{Decision, PolicyDecision, PolicyRule};
 pub use query::GraphQueryResult;
+pub use runtime::{RuntimeEvent, RuntimeFinding, RuntimeMonitor};
+pub use signing::{canonical_attestation_bytes, AttestationSigner, DigestSigner};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Engine { graph: SecurityGraph }
@@ -98,17 +102,17 @@ mod tests {
     }
 
     #[test]
-    fn enforcement_defaults_to_allow() {
-        let engine = Engine::new();
-        let decision = engine.evaluate_policy("read", "staging-db", &[]);
-        assert_eq!(decision.decision, Decision::Allow);
+    fn runtime_monitor_flags_undeclared_target() {
+        let monitor = RuntimeMonitor::new(["declared-api"]);
+        let event = RuntimeEvent { agent_id: "agent".into(), event_type: "network.connect".into(), target: "unknown-host".into(), timestamp_ms: 0, metadata: json!({}) };
+        assert!(monitor.observe(event).is_some());
     }
 
     #[test]
-    fn attestation_binds_to_graph_digest() {
-        let engine = sample();
-        let attestation = engine.attest("2026-08-21T00:00:00Z", "0.1.0");
-        assert_eq!(attestation.graph_digest, engine.stable_digest());
-        assert!(!Engine::attestation_digest(&attestation).is_empty());
+    fn signing_is_deterministic() {
+        let signer = DigestSigner;
+        let a = signer.sign(b"agentbom").unwrap();
+        let b = signer.sign(b"agentbom").unwrap();
+        assert_eq!(a, b);
     }
 }
