@@ -1,5 +1,5 @@
 use agentbom_core::{Edge, Node};
-use agentbom_engine::{AttestationSigner, CypherExporter, Engine, PolicyRule, RuntimeEvent};
+use agentbom_engine::{AttestationSigner, CypherExporter, Engine, PolicyRule, RuntimeEvent, ToolRequest};
 use pyo3::prelude::*;
 
 #[pyclass]
@@ -41,6 +41,11 @@ impl NativeGraph {
         let events: Vec<RuntimeEvent> = serde_json::from_str(&events_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
         let findings = events.iter().flat_map(|event| self.inner.correlate_behavior(event, max_hops, max_depth)).collect::<Vec<_>>();
         serde_json::to_string(&findings).map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+    fn enforce_request_json(&self, request_json: String, rules_json: String) -> PyResult<String> {
+        let request: ToolRequest = serde_json::from_str(&request_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let rules: Vec<PolicyRule> = serde_json::from_str(&rules_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        serde_json::to_string(&self.inner.enforce_request(&request, &rules)).map_err(pyo3::exceptions::PyValueError::new_err)
     }
     fn cypher_json(&self) -> PyResult<String> { serde_json::to_string(&CypherExporter::export(&self.inner).map_err(pyo3::exceptions::PyValueError::new_err)?).map_err(pyo3::exceptions::PyValueError::new_err) }
     fn policy_decision_json(&self, action: String, resource: String, rules_json: String) -> PyResult<String> { let rules: Vec<PolicyRule> = serde_json::from_str(&rules_json).map_err(pyo3::exceptions::PyValueError::new_err)?; serde_json::to_string(&self.inner.evaluate_policy(&action, &resource, &rules)).map_err(pyo3::exceptions::PyValueError::new_err) }
