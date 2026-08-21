@@ -1,0 +1,13 @@
+{
+  "case_id": "mcp-read-safe",
+  "class": "safe",
+  "description": "Agent has read-only workspace access to an explicitly declared resource.",
+  "input": {
+    "agent": "reader-agent",
+    "tool": "read_file",
+    "action": "read",
+    "resource": "workspace/README.md"
+  },
+  "expected_findings": [],
+  "expected_behavior": "allow"
+}
