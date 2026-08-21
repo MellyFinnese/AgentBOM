@@ -43,6 +43,7 @@ pub fn parse_aws_iam(payload: &str) -> Result<AuthorizationModel, String> {
                     resource,
                     effect: if stmt.effect.eq_ignore_ascii_case("deny") { Effect::Deny } else { Effect::Allow },
                     conditions: stmt.condition.clone(),
+                    provider: Some("aws-iam".into()),
                 });
             }
         }
@@ -57,7 +58,7 @@ pub fn parse_gcp_iam(payload: &str) -> Result<AuthorizationModel, String> {
     let mut permissions = Vec::new();
     for (i, binding) in policy.bindings.into_iter().enumerate() {
         for member in binding.members {
-            permissions.push(Permission { id: format!("gcp-binding-{i}-{member}"), principal: member, action: binding.role.clone(), resource: "*".into(), effect: Effect::Allow, conditions: binding.condition.clone().unwrap_or_else(|| serde_json::json!({})) });
+            permissions.push(Permission { id: format!("gcp-binding-{i}-{member}"), principal: member, action: binding.role.clone(), resource: "*".into(), effect: Effect::Allow, conditions: binding.condition.clone().unwrap_or_else(|| serde_json::json!({})), provider: Some("gcp-iam".into()) });
         }
     }
     Ok(AuthorizationModel { permissions })
@@ -66,7 +67,7 @@ pub fn parse_gcp_iam(payload: &str) -> Result<AuthorizationModel, String> {
 #[derive(Debug, Deserialize)] pub struct AzureRoleAssignment { pub principal_id: String, pub role_definition: String, #[serde(default)] pub scope: Option<String> }
 pub fn parse_azure_rbac(payload: &str) -> Result<AuthorizationModel, String> {
     let items = serde_json::from_str::<Vec<AzureRoleAssignment>>(payload).map_err(|e| format!("azure-rbac policy JSON: {e}"))?;
-    Ok(AuthorizationModel { permissions: items.into_iter().enumerate().map(|(i, a)| Permission { id: format!("azure-assignment-{i}"), principal: a.principal_id, action: a.role_definition, resource: a.scope.unwrap_or_else(|| "*".into()), effect: Effect::Allow, conditions: serde_json::json!({}) }).collect() })
+    Ok(AuthorizationModel { permissions: items.into_iter().enumerate().map(|(i, a)| Permission { id: format!("azure-assignment-{i}"), principal: a.principal_id, action: a.role_definition, resource: a.scope.unwrap_or_else(|| "*".into()), effect: Effect::Allow, conditions: serde_json::json!({}), provider: Some("azure-rbac".into()) }).collect() })
 }
 
 #[derive(Debug, Deserialize)] pub struct K8sRule { #[serde(default)] pub api_groups: Vec<String>, #[serde(default)] pub resources: Vec<String>, #[serde(default)] pub verbs: Vec<String> }
@@ -79,7 +80,7 @@ pub fn parse_kubernetes_rbac(payload: &str) -> Result<AuthorizationModel, String
         for rule in binding.role.rules {
             for verb in &rule.verbs {
                 for resource in &rule.resources {
-                    permissions.push(Permission { id: format!("k8s-{i}-{verb}-{resource}"), principal: binding.subject.clone(), action: verb.clone(), resource: resource.clone(), effect: Effect::Allow, conditions: serde_json::json!({"api_groups": rule.api_groups}) });
+                    permissions.push(Permission { id: format!("k8s-{i}-{verb}-{resource}"), principal: binding.subject.clone(), action: verb.clone(), resource: resource.clone(), effect: Effect::Allow, conditions: serde_json::json!({"api_groups": rule.api_groups}), provider: Some("kubernetes-rbac".into()) });
                 }
             }
         }
@@ -93,7 +94,7 @@ pub fn parse_oauth_scopes(payload: &str) -> Result<AuthorizationModel, String> {
     let mut permissions = Vec::new();
     for (i, grant) in items.into_iter().enumerate() {
         for scope in grant.scopes {
-            permissions.push(Permission { id: format!("oauth-{i}-{scope}"), principal: grant.principal.clone(), action: scope, resource: grant.audience.clone().unwrap_or_else(|| "*".into()), effect: Effect::Allow, conditions: serde_json::json!({}) });
+            permissions.push(Permission { id: format!("oauth-{i}-{scope}"), principal: grant.principal.clone(), action: scope, resource: grant.audience.clone().unwrap_or_else(|| "*".into()), effect: Effect::Allow, conditions: serde_json::json!({}), provider: Some("oauth".into()) });
         }
     }
     Ok(AuthorizationModel { permissions })
@@ -102,7 +103,7 @@ pub fn parse_oauth_scopes(payload: &str) -> Result<AuthorizationModel, String> {
 #[derive(Debug, Deserialize)] pub struct McpGrant { pub principal: String, pub tool: String, #[serde(default)] pub capability: Option<String>, #[serde(default)] pub resource: Option<String>, #[serde(default)] pub effect: Option<String> }
 pub fn parse_mcp_auth(payload: &str) -> Result<AuthorizationModel, String> {
     let items = serde_json::from_str::<Vec<McpGrant>>(payload).map_err(|e| format!("mcp policy JSON: {e}"))?;
-    Ok(AuthorizationModel { permissions: items.into_iter().enumerate().map(|(i, g)| Permission { id: format!("mcp-{i}"), principal: g.principal, action: g.capability.unwrap_or(g.tool), resource: g.resource.unwrap_or_else(|| "*".into()), effect: if g.effect.as_deref().is_some_and(|e| e.eq_ignore_ascii_case("deny")) { Effect::Deny } else { Effect::Allow }, conditions: serde_json::json!({}) }).collect() })
+    Ok(AuthorizationModel { permissions: items.into_iter().enumerate().map(|(i, g)| Permission { id: format!("mcp-{i}"), principal: g.principal, action: g.capability.unwrap_or(g.tool), resource: g.resource.unwrap_or_else(|| "*".into()), effect: if g.effect.as_deref().is_some_and(|e| e.eq_ignore_ascii_case("deny")) { Effect::Deny } else { Effect::Allow }, conditions: serde_json::json!({}), provider: Some("mcp".into()) }).collect() })
 }
 
 #[cfg(test)]
@@ -113,11 +114,13 @@ mod tests {
     fn aws_expands_actions_and_resources() {
         let model = parse_aws_iam(r#"{"statements":[{"effect":"Allow","principal":"agent","action":["read","write"],"resource":["prod-a","prod-b"]}]}"#).unwrap();
         assert_eq!(model.permissions.len(), 4);
+        assert!(model.permissions.iter().all(|p| p.provider.as_deref() == Some("aws-iam")));
     }
 
     #[test]
     fn kubernetes_expands_verbs_and_resources() {
         let model = parse_kubernetes_rbac(r#"[{"subject":"agent","role":{"rules":[{"api_groups":["apps"],"resources":["deployments","pods"],"verbs":["get","list"]}]}}]"#).unwrap();
         assert_eq!(model.permissions.len(), 4);
+        assert!(model.permissions.iter().all(|p| p.provider.as_deref() == Some("kubernetes-rbac")));
     }
 }
