@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling>=1.27"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
 [project]
 name = "agentbom"
@@ -15,8 +15,11 @@ dependencies = []
 [project.scripts]
 agentbom = "agentbom.cli:main"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/agentbom"]
+[tool.maturin]
+manifest-path = "rust/agentbom-python/Cargo.toml"
+bindings = "pyo3"
+module-name = "agentbom.agentbom_native"
+python-source = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
