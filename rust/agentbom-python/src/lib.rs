@@ -71,7 +71,7 @@ impl NativeGraph {
         let attestation: agentbom_engine::Attestation = serde_json::from_str(&attestation_json).map_err(py_value_error)?;
         let canonical = agentbom_engine::canonical_attestation_bytes(&attestation).map_err(py_value_error)?;
         let signature = agentbom_engine::DigestSigner.sign(&canonical).map_err(py_value_error)?;
-        Ok(hex::encode(signature))
+        Ok(signature.iter().map(|byte| format!("{byte:02x}")).collect())
     }
     fn effective_authority_json(&self, principal: String, max_hops: usize) -> PyResult<String> { serde_json::to_string(&self.inner.effective_authority(&principal, max_hops)).map_err(py_value_error) }
     fn correlated_security_paths_json(&self, principal: String, max_hops: usize, max_depth: usize) -> PyResult<String> { serde_json::to_string(&self.inner.correlated_security_paths(&principal, max_hops, max_depth)).map_err(py_value_error) }
