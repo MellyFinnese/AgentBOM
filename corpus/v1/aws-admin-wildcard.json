@@ -1,0 +1,9 @@
+{
+  "case_id": "aws-admin-wildcard",
+  "provider": "aws",
+  "class": "vulnerable",
+  "description": "Agent role grants wildcard administrative actions across all AWS resources.",
+  "input": {"principal": "agent-role", "action": "*", "resource": "*"},
+  "expected_findings": ["AGENTBOM-AUTH-WILDCARD"],
+  "expected_behavior": "deny-or-review"
+}
