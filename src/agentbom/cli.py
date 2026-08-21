@@ -10,6 +10,7 @@ from . import __version__
 from .discovery_mcp import MCPConfigSource, discover_mcp_config
 from .domain import EntityKind
 from .graph import InMemoryGraph
+from .interchange import findings_to_sarif, load_and_validate
 from .native_bridge import attack_paths, blast_radius, drift_findings, policy_findings
 from .native_bridge_extended import (
     correlated_findings,
@@ -35,6 +36,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("info", help="Show AgentBOM status")
+
+    validate = sub.add_parser("validate", help="Validate any AgentBOM v1 document against the canonical schema")
+    validate.add_argument("document", type=Path)
+
+    ingest = sub.add_parser("ingest", help="Validate and print any third-party AgentBOM v1 document")
+    ingest.add_argument("document", type=Path)
+
+    sarif = sub.add_parser("sarif", help="Emit scan findings as SARIF 2.1.0")
+    sarif.add_argument("target", type=Path)
+    sarif.add_argument("--output", type=Path, required=True)
+    sarif.add_argument("--behavior-events", type=Path)
+    sarif.add_argument("--max-depth", type=int, default=8)
 
     scan = sub.add_parser("scan", help="Discover and analyze an AgentBOM")
     scan.add_argument("target", type=Path)
@@ -154,6 +167,21 @@ def main() -> int:
     if args.command == "info":
         print("AgentBOM: Rust-native agent security engine")
         return 0
+    if args.command in {"validate", "ingest"}:
+        document = load_and_validate(args.document)
+        if args.command == "validate":
+            print(json.dumps({"valid": True, "schema_version": document["schema_version"]}, indent=2))
+        else:
+            print(json.dumps(document, indent=2, sort_keys=True))
+        return 0
+    if args.command == "sarif":
+        graph, _ = _scan(args.target)
+        findings = policy_findings(graph, args.max_depth)
+        if args.behavior_events:
+            from .native_bridge_extended import correlate_behavior
+            findings += correlate_behavior(graph, _load_events(args.behavior_events), 8, args.max_depth)
+        args.output.write_text(json.dumps(findings_to_sarif(findings, __version__), indent=2) + "\n", encoding="utf-8")
+        return _risk_exit(findings)
     if args.command == "auth-parse":
         print(json.dumps(parse_authorization(args.provider, args.policy.read_text(encoding="utf-8")), indent=2))
         return 0
