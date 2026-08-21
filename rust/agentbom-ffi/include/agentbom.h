@@ -12,6 +12,7 @@ int agentbom_engine_add_node_json(AgentBOMEngine* engine, const char* id, const 
 int agentbom_engine_add_edge(AgentBOMEngine* engine, const char* source, const char* kind, const char* target);
 int agentbom_engine_add_edge_json(AgentBOMEngine* engine, const char* source, const char* kind, const char* target, const char* properties_json);
 char* agentbom_engine_enforce_request(const AgentBOMEngine* engine, const char* request_json, const char* rules_json);
+char* agentbom_engine_inspect_mcp_call(const AgentBOMEngine* engine, const char* call_json, const char* action, const char* resource, const char* rules_json);
 char* agentbom_engine_snapshot_hash(const AgentBOMEngine* engine);
 char* agentbom_engine_policy_findings(const AgentBOMEngine* engine, unsigned long max_depth);
 char* agentbom_engine_attack_paths(const AgentBOMEngine* engine, unsigned long max_depth);
