@@ -25,3 +25,11 @@ def create_attestation(graph: Any, timestamp: str, engine_version: str) -> dict[
 def sign_attestation(attestation: dict[str, Any]) -> str:
     native = _require_native()()
     return native.sign_attestation_json(json.dumps(attestation, sort_keys=True))
+
+def effective_authority(graph: Any, principal: str, max_hops: int = 8) -> list[dict[str, Any]]:
+    native = build_native_graph(graph)
+    return json.loads(native.effective_authority_json(principal, max_hops))
+
+def delegation_findings(graph: Any, principal: str, max_hops: int = 8) -> list[dict[str, Any]]:
+    native = build_native_graph(graph)
+    return json.loads(native.delegation_findings_json(principal, max_hops))
