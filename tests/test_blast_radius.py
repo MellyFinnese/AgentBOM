@@ -17,7 +17,7 @@ def test_blast_radius_scores_production_database_as_critical() -> None:
     radius = analyze_blast_radius(graph, agent)
 
     assert radius.tier == ImpactTier.CRITICAL
-    assert radius.score >= 40
+    assert radius.score >= 80
     assert radius.resources[0].name == "production-db"
     assert radius.resources[0].tier == ImpactTier.CRITICAL
 
