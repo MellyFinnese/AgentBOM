@@ -27,9 +27,10 @@ def sign_attestation(attestation: dict[str, Any]) -> str:
     return native.sign_attestation_json(json.dumps(attestation, sort_keys=True))
 
 def effective_authority(graph: Any, principal: str, max_hops: int = 8) -> list[dict[str, Any]]:
-    native = build_native_graph(graph)
-    return json.loads(native.effective_authority_json(principal, max_hops))
+    return json.loads(build_native_graph(graph).effective_authority_json(principal, max_hops))
 
-def delegation_findings(graph: Any, principal: str, max_hops: int = 8) -> list[dict[str, Any]]:
-    native = build_native_graph(graph)
-    return json.loads(native.delegation_findings_json(principal, max_hops))
+def correlated_security_paths(graph: Any, principal: str, max_hops: int = 8, max_depth: int = 8) -> list[dict[str, Any]]:
+    return json.loads(build_native_graph(graph).correlated_security_paths_json(principal, max_hops, max_depth))
+
+def correlated_findings(graph: Any, principal: str, max_hops: int = 8, max_depth: int = 8) -> list[dict[str, Any]]:
+    return json.loads(build_native_graph(graph).correlated_findings_json(principal, max_hops, max_depth))
