@@ -7,6 +7,8 @@ pub struct Node {
     pub id: String,
     pub kind: String,
     pub name: String,
+    #[serde(default)]
+    pub properties: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -14,6 +16,8 @@ pub struct Edge {
     pub source: String,
     pub kind: String,
     pub target: String,
+    #[serde(default)]
+    pub properties: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -35,6 +39,10 @@ impl SecurityGraph {
         Ok(())
     }
 
+    pub fn outgoing<'a>(&'a self, source: &'a str) -> impl Iterator<Item = &'a Edge> {
+        self.edges.iter().filter(move |e| e.source == source)
+    }
+
     pub fn reachable(&self, start: &str, max_depth: usize) -> Vec<Vec<String>> {
         let mut queue = VecDeque::from([(start.to_owned(), vec![start.to_owned()])]);
         let mut paths = Vec::new();
@@ -42,7 +50,7 @@ impl SecurityGraph {
             if path.len().saturating_sub(1) >= max_depth {
                 continue;
             }
-            for edge in self.edges.iter().filter(|e| e.source == current) {
+            for edge in self.outgoing(&current) {
                 if path.contains(&edge.target) {
                     continue;
                 }
@@ -59,9 +67,7 @@ impl SecurityGraph {
         let mut nodes: Vec<_> = self.nodes.values().cloned().collect();
         nodes.sort_by(|a, b| a.id.cmp(&b.id));
         let mut edges = self.edges.clone();
-        edges.sort_by(|a, b| {
-            (&a.source, &a.kind, &a.target).cmp(&(&b.source, &b.kind, &b.target))
-        });
+        edges.sort_by(|a, b| (&a.source, &a.kind, &a.target).cmp(&(&b.source, &b.kind, &b.target)));
         let payload = serde_json::to_vec(&(nodes, edges)).expect("serializable graph");
         format!("{:x}", Sha256::digest(payload))
     }
@@ -92,12 +98,16 @@ pub struct GraphDiff {
 mod tests {
     use super::*;
 
+    fn node(id: &str, kind: &str, name: &str) -> Node {
+        Node { id: id.into(), kind: kind.into(), name: name.into(), properties: serde_json::json!({}) }
+    }
+
     #[test]
     fn graph_is_deterministic() {
         let mut graph = SecurityGraph::default();
-        graph.add_node(Node { id: "a".into(), kind: "agent".into(), name: "agent".into() });
-        graph.add_node(Node { id: "b".into(), kind: "data".into(), name: "prod-db".into() });
-        graph.add_edge(Edge { source: "a".into(), kind: "accesses".into(), target: "b".into() }).unwrap();
+        graph.add_node(node("a", "agent", "agent"));
+        graph.add_node(node("b", "data", "prod-db"));
+        graph.add_edge(Edge { source: "a".into(), kind: "accesses".into(), target: "b".into(), properties: serde_json::json!({}) }).unwrap();
         assert_eq!(graph.snapshot_hash(), graph.snapshot_hash());
         assert_eq!(graph.reachable("a", 2), vec![vec!["a".into(), "b".into()]]);
     }
