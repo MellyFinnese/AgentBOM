@@ -1,7 +1,8 @@
 use crate::delegation::effective_authority;
+use crate::runtime::RuntimeEvent;
 use agentbom_core::SecurityGraph;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecurityPath {
@@ -23,6 +24,19 @@ pub struct CorrelatedFinding {
     pub action: String,
     pub resource: String,
     pub path: Vec<String>,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BehaviorFinding {
+    pub rule_id: String,
+    pub severity: String,
+    pub title: String,
+    pub description: String,
+    pub agent_id: String,
+    pub event_type: String,
+    pub target: String,
+    pub matched_paths: Vec<SecurityPath>,
     pub evidence: Vec<String>,
 }
 
@@ -74,6 +88,40 @@ pub fn correlate_findings(graph: &SecurityGraph, principal: &str, max_hops: usiz
         .collect()
 }
 
+pub fn correlate_behavior(graph: &SecurityGraph, event: &RuntimeEvent, max_hops: usize, max_depth: usize) -> Vec<BehaviorFinding> {
+    let paths = correlated_security_paths(graph, &event.agent_id, max_hops, max_depth);
+    let target_lc = event.target.to_ascii_lowercase();
+    let matched = paths.into_iter().filter(|path| {
+        path.resource.to_ascii_lowercase() == target_lc || path.path.iter().any(|id| id.to_ascii_lowercase() == target_lc)
+    }).collect::<Vec<_>>();
+
+    if !matched.is_empty() {
+        return vec![BehaviorFinding {
+            rule_id: "RUNTIME-MATCHED-ATTACK-PATH".into(),
+            severity: if matched.iter().any(|p| p.delegated && (p.action == "*" || p.resource == "*")) { "critical".into() } else if matched.iter().any(|p| p.delegated) { "high".into() } else { "medium".into() },
+            title: "Observed runtime behavior matches a reachable security path".into(),
+            description: format!("Agent {} emitted {} toward {} and matched {} security path(s).", event.agent_id, event.event_type, event.target, matched.len()),
+            agent_id: event.agent_id.clone(),
+            event_type: event.event_type.clone(),
+            target: event.target.clone(),
+            evidence: matched.iter().flat_map(|p| p.path.clone()).collect(),
+            matched_paths: matched,
+        }];
+    }
+
+    vec![BehaviorFinding {
+        rule_id: "RUNTIME-UNMAPPED-BEHAVIOR".into(),
+        severity: "high".into(),
+        title: "Observed runtime behavior is not explained by the security graph".into(),
+        description: format!("Agent {} emitted {} toward {} without a matching modeled security path.", event.agent_id, event.event_type, event.target),
+        agent_id: event.agent_id.clone(),
+        event_type: event.event_type.clone(),
+        target: event.target.clone(),
+        matched_paths: Vec::new(),
+        evidence: vec![event.target.clone()],
+    }]
+}
+
 fn reachable_terminals(graph: &SecurityGraph, start: &str, max_depth: usize) -> Vec<(Vec<String>, String)> {
     let mut queue = VecDeque::from([(start.to_string(), vec![start.to_string()], 0usize)]);
     let mut seen = HashSet::from([start.to_string()]);
@@ -96,8 +144,7 @@ mod tests {
     use super::*;
     use agentbom_core::{Edge, Node, SecurityGraph};
 
-    #[test]
-    fn correlates_delegated_permission_to_resource() {
+    fn graph() -> SecurityGraph {
         let mut graph = SecurityGraph::default();
         graph.add_node(Node { id: "agent".into(), kind: "agent".into(), name: "agent".into(), properties: serde_json::json!({}) });
         graph.add_node(Node { id: "role".into(), kind: "identity".into(), name: "role".into(), properties: serde_json::json!({}) });
@@ -106,8 +153,20 @@ mod tests {
         graph.add_edge(Edge { source: "agent".into(), kind: "delegates".into(), target: "role".into(), properties: serde_json::json!({}) }).unwrap();
         graph.add_edge(Edge { source: "role".into(), kind: "grants".into(), target: "perm".into(), properties: serde_json::json!({}) }).unwrap();
         graph.add_edge(Edge { source: "perm".into(), kind: "accesses".into(), target: "db".into(), properties: serde_json::json!({}) }).unwrap();
-        let findings = correlate_findings(&graph, "agent", 4, 6);
+        graph
+    }
+
+    #[test]
+    fn correlates_delegated_permission_to_resource() {
+        let findings = correlate_findings(&graph(), "agent", 4, 6);
         assert!(!findings.is_empty());
         assert_eq!(findings[0].severity, "high");
+    }
+
+    #[test]
+    fn correlates_runtime_event() {
+        let event = RuntimeEvent { agent_id: "agent".into(), event_type: "database.write".into(), target: "prod".into(), timestamp_ms: 1, metadata: serde_json::json!({}) };
+        let findings = correlate_behavior(&graph(), &event, 4, 6);
+        assert_eq!(findings[0].rule_id, "RUNTIME-MATCHED-ATTACK-PATH");
     }
 }
