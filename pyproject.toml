@@ -24,7 +24,7 @@ dev = [
 ]
 
 [project.scripts]
-agentbom = "agentbom.cli:main"
+agentbom = "agentbom.cli_safe:main"
 
 [tool.maturin]
 manifest-path = "rust/agentbom-python/Cargo.toml"
