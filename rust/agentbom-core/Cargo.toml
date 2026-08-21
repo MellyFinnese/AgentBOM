@@ -1,0 +1,15 @@
+[package]
+name = "agentbom-core"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Rust security graph and analysis engine for AgentBOM"
+
+[lib]
+name = "agentbom_core"
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+thiserror = "2"
