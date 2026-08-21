@@ -76,7 +76,7 @@ impl EnforcementGateway {
 }
 
 fn audit_id(request: &ToolRequest, decision: &Decision, rule: Option<&str>) -> String {
-    let canonical = format!("{}|{}|{}|{}|{}|{}", request.request_id, request.agent_id, request.tool, request.action, request.resource, serde_json::to_string(&decision).unwrap_or_default());
+    let canonical = format!("{}|{}|{}|{}|{}|{}", request.request_id, request.agent_id, request.tool, request.action, request.resource, serde_json::to_string(decision).unwrap_or_default());
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
     if let Some(rule) = rule { hasher.update(rule.as_bytes()); }
@@ -86,7 +86,6 @@ fn audit_id(request: &ToolRequest, decision: &Decision, rule: Option<&str>) -> S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Engine;
     use serde_json::json;
 
     #[test]
@@ -94,7 +93,8 @@ mod tests {
         let engine = Engine::new();
         let rules = vec![PolicyRule { id: "block-prod-delete".into(), action: "delete".into(), resource: "production/*".into(), decision: Decision::Deny }];
         let request = ToolRequest { request_id: "r1".into(), agent_id: "agent".into(), tool: "db".into(), action: "delete".into(), resource: "production/db".into(), arguments: json!({}), approval_token: None };
-        let result = EnforcementGateway.evaluate(&EnforcementGateway, &engine, &request, &rules);
+        let gateway = EnforcementGateway;
+        let result = gateway.evaluate(&engine, &request, &rules);
         assert_eq!(result.decision, Decision::Deny);
         assert!(!result.audit_id.is_empty());
     }
@@ -104,7 +104,8 @@ mod tests {
         let engine = Engine::new();
         let rules = vec![PolicyRule { id: "approve-prod-write".into(), action: "write".into(), resource: "production/*".into(), decision: Decision::RequireApproval }];
         let request = ToolRequest { request_id: "r2".into(), agent_id: "agent".into(), tool: "db".into(), action: "write".into(), resource: "production/db".into(), arguments: json!({}), approval_token: Some("approved".into()) };
-        let result = EnforcementGateway.evaluate(&EnforcementGateway, &engine, &request, &rules);
+        let gateway = EnforcementGateway;
+        let result = gateway.evaluate(&engine, &request, &rules);
         assert_eq!(result.decision, Decision::Allow);
     }
 }
