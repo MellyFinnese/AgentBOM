@@ -16,6 +16,10 @@ def correlate_behavior(graph: Any, events: list[dict[str, Any]], max_hops: int =
     native = build_native_graph(graph)
     return json.loads(native.correlate_behavior_json(json.dumps(events, sort_keys=True), max_hops, max_depth))
 
+def enforce_request(graph: Any, request: dict[str, Any], rules: list[dict[str, Any]]) -> dict[str, Any]:
+    native = build_native_graph(graph)
+    return json.loads(native.enforce_request_json(json.dumps(request, sort_keys=True), json.dumps(rules, sort_keys=True)))
+
 def export_cypher(graph: Any) -> list[dict[str, Any]]:
     return json.loads(build_native_graph(graph).cypher_json())
 
