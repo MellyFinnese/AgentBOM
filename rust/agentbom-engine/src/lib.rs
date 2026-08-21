@@ -5,14 +5,18 @@ use sha2::{Digest, Sha256};
 pub mod analysis;
 pub mod attestation;
 pub mod authorization;
+pub mod backend;
 pub mod drift;
 pub mod enforcement;
+pub mod query;
 
 use analysis::{analyze_policy, attack_paths, blast_radius, BlastRadius, PathResult, PolicyFinding};
 use drift::{analyze_drift, DriftFinding};
 pub use attestation::Attestation;
 pub use authorization::{AuthorizationModel, Permission};
+pub use backend::{GraphBackend, JsonBackend};
 pub use enforcement::{Decision, PolicyDecision, PolicyRule};
+pub use query::GraphQueryResult;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Engine { graph: SecurityGraph }
@@ -35,6 +39,21 @@ impl Engine {
     pub fn attack_paths(&self, max_depth: usize) -> Vec<PathResult> { attack_paths(&self.graph, max_depth) }
     pub fn blast_radius(&self, max_depth: usize) -> Vec<BlastRadius> { blast_radius(&self.graph, max_depth) }
     pub fn drift_findings(&self, baseline: &Engine) -> Vec<DriftFinding> { analyze_drift(&self.graph, &baseline.graph) }
+    pub fn paths_to_kind(&self, start: &str, target_kind: &str, max_depth: usize) -> GraphQueryResult { self.query_paths_to_kind(start, target_kind, max_depth) }
+    pub fn evaluate_policy(&self, action: &str, resource: &str, rules: &[PolicyRule]) -> PolicyDecision { enforcement::evaluate(self, action, resource, rules) }
+}
+
+impl Engine {
+    fn query_paths_to_kind(&self, start: &str, target_kind: &str, max_depth: usize) -> GraphQueryResult {
+        let paths = self.graph.reachable(start, max_depth).into_iter().filter(|path| {
+            path.last().and_then(|id| self.graph.nodes.get(id)).map(|node| node.kind.as_str() == target_kind).unwrap_or(false)
+        }).collect();
+        GraphQueryResult { start: start.into(), target_kind: Some(target_kind.into()), paths }
+    }
+
+    pub fn agents_reaching_kind(&self, target_kind: &str, max_depth: usize) -> Vec<GraphQueryResult> {
+        self.graph.nodes.values().filter(|n| n.kind == "agent").map(|n| self.query_paths_to_kind(&n.id, target_kind, max_depth)).filter(|r| !r.paths.is_empty()).collect()
+    }
 }
 
 #[cfg(test)]
@@ -59,6 +78,7 @@ mod tests {
         assert!(!engine.attack_paths(4).is_empty());
         assert!(engine.policy_findings(4).iter().any(|f| f.rule_id == "PATH-HIGH-IMPACT"));
         assert_eq!(engine.summary().node_count, 3);
+        assert_eq!(engine.paths_to_kind("agent", "data_source", 4).paths.len(), 1);
     }
 
     #[test]
