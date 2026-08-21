@@ -1,16 +1,17 @@
-use agentbom_core::{Edge, Node, SecurityGraph};
+use agentbom_core::{Edge, Node};
+use agentbom_engine::Engine;
 use pyo3::prelude::*;
 
 #[pyclass]
 struct NativeGraph {
-    inner: SecurityGraph,
+    inner: Engine,
 }
 
 #[pymethods]
 impl NativeGraph {
     #[new]
     fn new() -> Self {
-        Self { inner: SecurityGraph::default() }
+        Self { inner: Engine::new() }
     }
 
     fn add_node(&mut self, id: String, kind: String, name: String) {
@@ -18,17 +19,9 @@ impl NativeGraph {
     }
 
     fn add_edge(&mut self, source: String, kind: String, target: String) -> PyResult<()> {
-        self.inner.add_edge(Edge { source, kind, target })
-            .map_err(pyo3::exceptions::PyValueError::new_err)
-    }
-
-    fn outgoing(&self, source: String) -> Vec<(String, String, String)> {
         self.inner
-            .edges
-            .iter()
-            .filter(|edge| edge.source == source)
-            .map(|edge| (edge.source.clone(), edge.kind.clone(), edge.target.clone()))
-            .collect()
+            .add_edge(Edge { source, kind, target })
+            .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     fn reachable(&self, start: String, max_depth: usize) -> Vec<Vec<String>> {
@@ -39,12 +32,22 @@ impl NativeGraph {
         self.inner.snapshot_hash()
     }
 
+    fn stable_digest(&self) -> String {
+        self.inner.stable_digest()
+    }
+
+    fn export_json(&self) -> PyResult<String> {
+        self.inner
+            .export_json()
+            .map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+
     fn node_count(&self) -> usize {
-        self.inner.nodes.len()
+        self.inner.summary().node_count
     }
 
     fn edge_count(&self) -> usize {
-        self.inner.edges.len()
+        self.inner.summary().edge_count
     }
 }
 
