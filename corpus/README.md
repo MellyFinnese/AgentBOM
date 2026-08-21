@@ -6,7 +6,7 @@ The corpus is deliberately versioned independently from implementation code. Add
 
 ## Current corpus
 
-The v1 corpus contains **12 cases** spanning **MCP, AWS, and GCP** inputs, with both vulnerable cases and safe controls.
+The v1 corpus contains **13 cases** spanning **MCP, AWS, and GCP** inputs, with both vulnerable cases and safe controls.
 
 Coverage includes:
 
