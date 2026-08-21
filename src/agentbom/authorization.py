@@ -74,6 +74,7 @@ def build_authorization_record(
                 name=f"{grant.action} {grant.resource}",
                 properties={
                     "action": grant.action,
+                    "resource": grant.resource,
                     "effect": grant.effect.value,
                     "conditions": dict(grant.conditions),
                 },
@@ -113,7 +114,7 @@ def connect_authorization(graph: GraphStore, record: AuthorizationRecord) -> Non
         graph.add_relationship(
             Relationship(record.credential.id, RelationKind.GRANTS, permission.id)
         )
-        resource_name = str(permission.properties.get("resource", permission.name.split(" ", 1)[-1]))
+        resource_name = str(permission.properties["resource"])
         for resource in record.resources:
             if resource.name == resource_name:
                 graph.add_relationship(
