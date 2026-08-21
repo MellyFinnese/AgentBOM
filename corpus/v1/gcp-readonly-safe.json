@@ -1,0 +1,9 @@
+{
+  "case_id": "gcp-readonly-safe",
+  "provider": "gcp",
+  "class": "safe",
+  "description": "Agent has viewer-only access to a non-production dataset and no mutation authority.",
+  "input": {"principal": "agent-readonly", "role": "roles/viewer", "resource": "projects/staging/datasets/docs"},
+  "expected_findings": [],
+  "expected_behavior": "allow"
+}
