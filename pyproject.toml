@@ -13,8 +13,13 @@ authors = [{name = "MellyFinnese"}]
 dependencies = ["jsonschema>=4.23,<5"]
 
 [project.optional-dependencies]
+test = [
+  "hypothesis>=6.112,<7",
+  "pytest>=8,<9",
+]
 dev = [
   "hypothesis>=6.112,<7",
+  "maturin>=1.9,<2",
   "pytest>=8,<9",
 ]
 
