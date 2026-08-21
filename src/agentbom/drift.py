@@ -27,7 +27,7 @@ class DriftFinding:
 
 
 SENSITIVE_KINDS = {"credential", "permission", "identity", "deployment", "database", "data_source"}
-HIGH_IMPACT_RELATIONS = {"grants", "accesses", "authenticates_as", "assumes", "delegates", "writes", "calls"}
+HIGH_IMPACT_RELATIONS = {"grants", "accesses", "authenticates_as", "assumes", "delegates", "writes", "reads", "calls"}
 
 
 def compare_snapshots(previous: Snapshot, current: Snapshot) -> tuple[DriftFinding, ...]:
@@ -87,13 +87,16 @@ def compare_snapshots(previous: Snapshot, current: Snapshot) -> tuple[DriftFindi
     for key in sorted(current_relationships.keys() - previous_relationships.keys()):
         relationship = current_relationships[key]
         relation = str(relationship.get("kind", "unknown"))
-        severity = "high" if relation in HIGH_IMPACT_RELATIONS else "medium"
+        target = current_entities.get(str(relationship.get("target")), {})
+        target_kind = str(target.get("kind", "unknown"))
+        target_name = str(target.get("name", relationship.get("target", "unknown")))
+        severity = _relationship_severity(relation, target)
         findings.append(
             DriftFinding(
                 DriftType.ADDED_RELATIONSHIP,
                 severity,
                 "New security relationship appeared",
-                f"Relationship {relation} connects {relationship.get('source')} to {relationship.get('target')}.",
+                f"Relationship {relation} connects {relationship.get('source')} to {target_name} ({target_kind}).",
                 key,
             )
         )
@@ -117,6 +120,28 @@ def summarize_drift(findings: Iterable[DriftFinding]) -> dict[str, object]:
     findings = tuple(findings)
     counts = {severity: sum(1 for finding in findings if finding.severity == severity) for severity in ("critical", "high", "medium", "low")}
     return {"total": len(findings), "counts": counts}
+
+
+def _relationship_severity(relation: str, target: dict[str, object]) -> str:
+    target_kind = str(target.get("kind", "unknown"))
+    searchable = " ".join(
+        (
+            str(target.get("name", "")),
+            *(f"{key}={value}" for key, value in dict(target.get("properties", {})).items()),
+        )
+    ).lower()
+    is_sensitive_target = target_kind in SENSITIVE_KINDS
+    is_critical_target = target_kind in {"database", "deployment"} and any(
+        token in searchable for token in ("production", "prod", "root", "admin", "secret", "payment")
+    )
+
+    if is_critical_target and relation in HIGH_IMPACT_RELATIONS:
+        return "critical"
+    if is_sensitive_target and relation in HIGH_IMPACT_RELATIONS:
+        return "high"
+    if relation in HIGH_IMPACT_RELATIONS:
+        return "high"
+    return "medium"
 
 
 def _relationship_key(item: dict[str, object]) -> str:
