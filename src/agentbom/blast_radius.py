@@ -4,17 +4,13 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from enum import StrEnum
 
 from .domain import Entity, EntityKind
 from .graph import GraphStore
+from .risk import DEFAULT_SENSITIVE_PATTERNS, RiskTier, entity_sensitivity, tier_weight
 
-
-class ImpactTier(StrEnum):
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
+# Backwards-compatible public name; severity values now come from the shared taxonomy.
+ImpactTier = RiskTier
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +21,7 @@ class ImpactedResource:
     tier: ImpactTier
     distance: int
     path_count: int
+    sensitivity_reason: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,18 +56,14 @@ class BlastRadius:
         return ImpactTier.LOW
 
 
-_RESOURCE_TIERS = {
-    EntityKind.DEPLOYMENT: ImpactTier.CRITICAL,
-    EntityKind.DATABASE: ImpactTier.CRITICAL,
-    EntityKind.DATA_SOURCE: ImpactTier.HIGH,
-    EntityKind.CREDENTIAL: ImpactTier.HIGH,
-    EntityKind.IDENTITY: ImpactTier.HIGH,
-    EntityKind.PERMISSION: ImpactTier.MEDIUM,
-}
-
-
-def analyze_blast_radius(graph: GraphStore, origin: Entity, *, max_depth: int = 8) -> BlastRadius:
-    """Find reachable security-relevant resources and calculate a bounded impact score."""
+def analyze_blast_radius(
+    graph: GraphStore,
+    origin: Entity,
+    *,
+    max_depth: int = 8,
+    sensitive_patterns: tuple[str, ...] = DEFAULT_SENSITIVE_PATTERNS,
+) -> BlastRadius:
+    """Find reachable security-relevant resources and calculate bounded impact."""
     max_depth = max(1, max_depth)
     queue: deque[tuple[str, int]] = deque([(origin.id, 0)])
     distance: dict[str, int] = {origin.id: 0}
@@ -83,8 +76,8 @@ def analyze_blast_radius(graph: GraphStore, origin: Entity, *, max_depth: int = 
         for relation in graph.outgoing(current_id):
             target_id = relation.target_id
             next_depth = depth + 1
-            previous = distance.get(target_id)
             path_counts[target_id] = path_counts.get(target_id, 0) + path_counts.get(current_id, 1)
+            previous = distance.get(target_id)
             if previous is None:
                 distance[target_id] = next_depth
                 queue.append((target_id, next_depth))
@@ -99,46 +92,42 @@ def analyze_blast_radius(graph: GraphStore, origin: Entity, *, max_depth: int = 
         entity = graph.get_entity(entity_id)
         if entity is None:
             continue
-        tier = _classify(entity)
-        if tier is None:
+        sensitivity = entity_sensitivity(entity, sensitive_patterns)
+        if sensitivity.tier is None:
             continue
         resources.append(
             ImpactedResource(
                 entity_id=entity.id,
                 name=entity.name,
                 kind=entity.kind,
-                tier=tier,
+                tier=sensitivity.tier,
                 distance=dist,
                 path_count=path_counts.get(entity.id, 1),
+                sensitivity_reason=sensitivity.matched_patterns,
             )
         )
 
-    resources.sort(key=lambda item: (-_tier_weight(item.tier), item.distance, item.name))
+    resources.sort(key=lambda item: (-tier_weight(item.tier), item.distance, item.name))
     return BlastRadius(origin.id, origin.name, tuple(resources))
 
 
-def analyze_all_agents(graph: GraphStore, *, max_depth: int = 8) -> tuple[BlastRadius, ...]:
+def analyze_all_agents(
+    graph: GraphStore,
+    *,
+    max_depth: int = 8,
+    sensitive_patterns: tuple[str, ...] = DEFAULT_SENSITIVE_PATTERNS,
+) -> tuple[BlastRadius, ...]:
     return tuple(
-        analyze_blast_radius(graph, entity, max_depth=max_depth)
+        analyze_blast_radius(graph, entity, max_depth=max_depth, sensitive_patterns=sensitive_patterns)
         for entity in graph.entities.values()
         if entity.kind == EntityKind.AGENT
     )
 
 
 def _classify(entity: Entity) -> ImpactTier | None:
-    tier = _RESOURCE_TIERS.get(entity.kind)
-    if tier is None:
-        return None
-    searchable = " ".join((entity.name, *(f"{k}={v}" for k, v in entity.properties.items()))).lower()
-    if any(token in searchable for token in ("production", "prod", "root", "admin", "secret", "payment")):
-        return ImpactTier.CRITICAL
-    return tier
+    """Compatibility helper backed by the shared taxonomy."""
+    return entity_sensitivity(entity).tier
 
 
 def _tier_weight(tier: ImpactTier) -> int:
-    return {
-        ImpactTier.CRITICAL: 4,
-        ImpactTier.HIGH: 3,
-        ImpactTier.MEDIUM: 2,
-        ImpactTier.LOW: 1,
-    }[tier]
+    return tier_weight(tier)
