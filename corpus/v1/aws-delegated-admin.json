@@ -1,0 +1,9 @@
+{
+  "case_id": "aws-delegated-admin",
+  "provider": "aws",
+  "class": "vulnerable",
+  "description": "A user delegates an assumable role that gives an agent administrator-level authority.",
+  "input": {"principal": "agent-role", "delegation": "user->agent->admin-role", "action": "iam:CreateUser", "resource": "*"},
+  "expected_findings": ["AGENTBOM-DELEGATION-ESCALATION"],
+  "expected_behavior": "deny-or-review"
+}
