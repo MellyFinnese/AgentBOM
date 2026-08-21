@@ -21,9 +21,32 @@ AgentBOM is **Rust-first**. The security engine is implemented once in native Ru
           Tooling        C/C++/Go/etc.
 ```
 
-`agentbom-core` contains graph primitives. `agentbom-engine` is the stable native API and owns graph traversal, authorization, policy, attack paths, blast radius, runtime correlation, attestations, and temporal drift. `agentbom-ffi` publishes the C ABI, `agentbom-python` exposes the same engine through PyO3, and `agentbom-wasm` exposes the analysis API to WebAssembly. Security-critical analysis is not maintained as a second Python implementation.
+`agentbom-core` contains graph primitives. `agentbom-engine` is the stable native API and owns graph traversal, authorization, delegation, policy, attack paths, blast radius, runtime correlation, attestations, and temporal drift. `agentbom-ffi` publishes the C ABI, `agentbom-python` exposes the same engine through PyO3, and `agentbom-wasm` exposes the analysis API to WebAssembly. Security-critical analysis is not maintained as a second Python implementation.
 
-CI builds the native workspace, C ABI, and WebAssembly target.
+## AgentBOM v1
+
+AgentBOM is also a versioned interchange format, not only a CLI. The current schema is `1.0`:
+
+```text
+AgentBOM v1
+├── document metadata
+├── entities
+├── relationships
+├── evidence
+├── findings
+├── attack paths
+└── attestation
+```
+
+Schema: `schema/agentbom-v1.schema.json`
+
+Specification: `docs/AGENTBOM-V1.md`
+
+Generate a portable AgentBOM document:
+
+```bash
+agentbom spec ./mcp.json --output agentbom.json
+```
 
 ## Current vertical slice
 
@@ -31,25 +54,60 @@ AgentBOM can inspect an MCP-style JSON manifest without executing the configured
 
 ```bash
 agentbom scan ./mcp.json
-agentbom scan ./mcp.json --auth
-agentbom scan ./mcp.json --paths
-agentbom scan ./mcp.json --policy
-agentbom scan ./mcp.json --blast-radius
+agentbom scan ./mcp.json --auth --paths --policy --blast-radius
 agentbom scan ./mcp.json --runtime --reconcile
 agentbom scan ./mcp.json --save-baseline .agentbom/baseline.json
 agentbom scan ./mcp.json --compare-baseline .agentbom/baseline.json
-agentbom scan ./mcp.json --json --auth --paths --policy --blast-radius --runtime --reconcile --compare-baseline .agentbom/baseline.json
 ```
 
-Discovery normalizes declared agents, MCP servers, tools, credentials, capabilities, identities, permission grants, and resource scope into the AgentBOM graph.
+### Provider authorization
 
-The native Rust engine evaluates wildcard grants, production mutation authority, configuration-referenced credentials, dangerous tool capabilities, reachable high-impact resources, blast radius, graph drift, and runtime anomalies.
+Normalize provider-specific authorization through the Rust engine:
 
-Authorization adapters provide a provider-neutral ingestion boundary for AWS IAM, GCP IAM, Azure RBAC, Kubernetes RBAC, OAuth scopes, and MCP authorization data. The adapters normalize policy JSON into one permission model so the analysis engine stays provider-agnostic.
+```bash
+agentbom auth-parse aws-iam policy.json
+agentbom auth-parse gcp-iam policy.json
+agentbom auth-parse azure-rbac policy.json
+agentbom auth-parse kubernetes-rbac policy.json
+agentbom auth-parse oauth scopes.json
+agentbom auth-parse mcp policy.json
+```
 
-Runtime monitoring uses a declared-target set and flags observed events aimed at undeclared runtime targets. Attestations are bound to the engine's stable graph digest, with a pluggable signer interface for external signing systems.
+### Effective authority and delegation
 
-Temporal snapshots compare the normalized security graph across scans and highlight newly introduced entities, permissions, credentials, tools, and relationships. Baselines are canonicalized and SHA-256 digested before comparison.
+AgentBOM treats delegation as a security relationship, not just metadata:
+
+```text
+User
+ ↓ delegates
+Agent A
+ ↓ delegates
+Agent B
+ ↓ grants
+Permission
+ ↓ accesses
+Resource
+```
+
+Resolve what a principal can reach through bounded delegation:
+
+```bash
+agentbom authority ./mcp.json agent-a --max-hops 8
+agentbom authority ./mcp.json agent-a --findings
+```
+
+This is designed to expose transitive authority, inherited privileges, and wildcard authority before they become hidden attack paths.
+
+### Runtime, policy, graph, and attestation workflows
+
+```bash
+agentbom monitor events.json --declared declared.json
+agentbom cypher ./mcp.json
+agentbom policy-check write production-db --rules policy.json
+agentbom attest ./mcp.json --output attestation.json
+```
+
+The native Rust engine evaluates wildcard grants, production mutation authority, configuration-referenced credentials, dangerous tool capabilities, reachable high-impact resources, blast radius, graph drift, runtime anomalies, and delegated authority.
 
 ## Architecture
 
@@ -66,9 +124,10 @@ Temporal snapshots compare the normalized security graph across scans and highli
                           v
                 +-------------------------+
                 | Rust Security Engine     |
-                | graph / auth / policy    |
+                | graph / identity / auth  |
+                | delegation / policy      |
                 | paths / blast / drift    |
-                | runtime / attestation    |
+                | runtime / attestation   |
                 +-----------+-------------+
                             |
              +--------------+--------------+
@@ -90,7 +149,9 @@ Temporal snapshots compare the normalized security graph across scans and highli
 
 - **Rust-first:** one authoritative native implementation for security-critical analysis.
 - **Stable bindings:** C ABI for broad interoperability, PyO3 for Python ergonomics, and WebAssembly for portable embedding.
+- **Versioned format:** AgentBOM v1 defines a stable interchange document independent of the implementation language.
 - **Provider-neutral authorization:** cloud/IAM/OAuth/MCP permissions normalize into the same model.
+- **Delegation-aware:** effective authority is resolved across bounded delegation, assume, and impersonation relationships.
 - **Domain-first:** the security model comes before integrations.
 - **Capability-aware:** capabilities and authorization are modeled explicitly.
 - **Authority-aware:** identity, credentials, permission grants, effects, conditions, and resource scope are first-class concepts.
@@ -98,10 +159,10 @@ Temporal snapshots compare the normalized security graph across scans and highli
 - **Temporal:** security changes are evaluated against verified baselines rather than raw text diffs.
 - **Evidence-backed:** discoveries retain source and provenance metadata.
 - **Graph-native:** relationships are part of the security model, not an enrichment step.
-- **Deterministic:** policy, path, blast-radius, reconciliation, snapshot, drift, and attestation operations are reproducible and bounded.
+- **Deterministic:** policy, path, blast-radius, reconciliation, delegation, snapshot, drift, and attestation operations are reproducible and bounded.
 - **Backend-neutral:** the engine can use JSON locally and can be extended to graph backends without changing the security model.
 - **Safe discovery:** configuration inspection and runtime discovery do not execute arbitrary agent or MCP code.
 
 ## Status
 
-Early active development. The Rust-native graph engine, authorization abstraction, provider adapter boundary, stable engine API, C FFI, PyO3 binding, WASM binding, discovery, policy, attack-path, blast-radius, runtime monitoring, attestation, and temporal drift foundations are in place. Next major work is production-grade cloud/provider ingestion, concrete Memgraph/Neo4j persistence, continuous monitoring agents, and cryptographic attestation integrations.
+Early active development. The Rust-native graph engine, AgentBOM v1 schema, authorization/delegation model, provider adapter boundary, stable engine API, C FFI, PyO3 binding, WASM binding, discovery, policy, attack-path, blast-radius, runtime monitoring, attestation, and temporal drift foundations are in place. Next major work is production-grade cloud/provider ingestion, concrete Memgraph/Neo4j persistence, continuous monitoring agents, and cryptographic attestation integrations.
