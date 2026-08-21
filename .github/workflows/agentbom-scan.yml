@@ -17,11 +17,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.85.1
       - name: Install AgentBOM
-        run: pip install .
+        run: python -m pip install .
       - name: Validate AgentBOM schema fixture
         run: agentbom validate examples/spec/go-producer/agentbom.json
+      - name: Run Python tests
+        run: python -m pytest -q
       - name: Emit SARIF
         run: agentbom sarif . --output agentbom.sarif
       - name: Upload SARIF
