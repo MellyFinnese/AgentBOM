@@ -16,6 +16,7 @@ from .native_bridge_extended import (
     correlated_security_paths,
     create_attestation,
     effective_authority,
+    enforce_request,
     enforcement_decision,
     export_cypher,
     parse_authorization,
@@ -27,13 +28,9 @@ from .snapshot import load_snapshot, save_snapshot, snapshot_graph, verify_snaps
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="agentbom",
-        description="AI agent security and attack-surface intelligence.",
-    )
+    parser = argparse.ArgumentParser(prog="agentbom", description="AI agent security and attack-surface intelligence.")
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command")
-
     sub.add_parser("info", help="Show AgentBOM status")
 
     scan = sub.add_parser("scan", help="Discover and analyze an AgentBOM")
@@ -61,12 +58,19 @@ def build_parser() -> argparse.ArgumentParser:
     mon.add_argument("--declared", type=Path, required=True)
 
     behavior = sub.add_parser("behavior-check", help="Correlate runtime behavior with effective authority and attack paths")
-    behavior.add_argument("target", type=Path, help="Project or MCP manifest used to construct the security graph")
-    behavior.add_argument("events", type=Path, help="Runtime events JSON")
+    behavior.add_argument("target", type=Path)
+    behavior.add_argument("events", type=Path)
     behavior.add_argument("--max-hops", type=int, default=8)
     behavior.add_argument("--max-depth", type=int, default=8)
     behavior.add_argument("--json", action="store_true", dest="as_json")
     behavior.add_argument("--fail-on-risk", action="store_true", help="Return non-zero for high/critical findings")
+
+    enforce = sub.add_parser("enforce", help="Evaluate a tool request through the native policy enforcement gateway")
+    enforce.add_argument("target", type=Path)
+    enforce.add_argument("request", type=Path, help="Tool request JSON")
+    enforce.add_argument("--rules", type=Path, required=True)
+    enforce.add_argument("--audit", action="store_true", help="Include an audit event in the output")
+    enforce.add_argument("--fail-on-deny", action="store_true", help="Return non-zero when the request is denied or needs approval")
 
     cy = sub.add_parser("cypher", help="Export a discovered graph as parameterized Cypher statements")
     cy.add_argument("target", type=Path)
@@ -94,7 +98,6 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--max-hops", type=int, default=8)
     ap.add_argument("--max-depth", type=int, default=8)
     ap.add_argument("--findings", action="store_true")
-
     return parser
 
 
@@ -121,47 +124,52 @@ def _risk_exit(findings: list[dict[str, object]]) -> int:
 
 def main() -> int:
     args = build_parser().parse_args()
-
     if args.command == "info":
         print("AgentBOM: Rust-native agent security engine")
         return 0
-
     if args.command == "auth-parse":
         print(json.dumps(parse_authorization(args.provider, args.policy.read_text(encoding="utf-8")), indent=2))
         return 0
-
     if args.command == "monitor":
         declared = json.loads(args.declared.read_text(encoding="utf-8"))
-        events = _load_events(args.events)
-        print(json.dumps(runtime_monitor_json(declared, events), indent=2))
+        print(json.dumps(runtime_monitor_json(declared, _load_events(args.events)), indent=2))
         return 0
-
     if args.command == "behavior-check":
         graph, _ = _scan(args.target)
-        events = _load_events(args.events)
-        from .native_bridge import build_native_graph, _require_native
-
-        native = build_native_graph(graph)
-        findings = json.loads(native.correlate_behavior_json(json.dumps(events), args.max_hops, args.max_depth))
-        payload = {
-            "analysis_engine": "rust",
-            "events": len(events),
-            "findings": findings,
-            "high_or_critical": sum(str(item.get("severity", "")).lower() in {"high", "critical"} for item in findings),
-        }
-        print(json.dumps(payload, indent=2, default=str) if args.as_json else json.dumps(payload["findings"], indent=2, default=str))
+        findings = correlate_behavior(graph, _load_events(args.events), args.max_hops, args.max_depth)
+        payload = {"analysis_engine": "rust", "findings": findings, "high_or_critical": sum(str(f.get("severity", "")).lower() in {"high", "critical"} for f in findings)}
+        print(json.dumps(payload if args.as_json else findings, indent=2, default=str))
         return _risk_exit(findings) if args.fail_on_risk else 0
-
+    if args.command == "enforce":
+        graph, _ = _scan(args.target)
+        request = json.loads(args.request.read_text(encoding="utf-8"))
+        rules = json.loads(args.rules.read_text(encoding="utf-8"))
+        decision = enforce_request(graph, request, rules)
+        payload: dict[str, object] = {"analysis_engine": "rust", "decision": decision}
+        if args.audit:
+            payload["audit"] = {
+                "audit_id": decision["audit_id"],
+                "request_id": decision["request_id"],
+                "agent_id": request.get("agent_id"),
+                "tool": request.get("tool"),
+                "action": request.get("action"),
+                "resource": request.get("resource"),
+                "decision": decision["decision"],
+                "matched_rule": decision.get("matched_rule"),
+                "reason": decision["reason"],
+            }
+        print(json.dumps(payload, indent=2, default=str))
+        if args.fail_on_deny and decision["decision"] in {"Deny", "RequireApproval"}:
+            return 1
+        return 0
     if args.command == "cypher":
         graph, _ = _scan(args.target)
         print(json.dumps(export_cypher(graph), indent=2))
         return 0
-
     if args.command == "policy-check":
         rules = json.loads(args.rules.read_text(encoding="utf-8"))
         print(json.dumps(enforcement_decision(args.action, args.resource, rules), indent=2))
         return 0
-
     if args.command == "attest":
         graph, _ = _scan(args.target)
         attestation = create_attestation(graph, datetime.now(timezone.utc).isoformat(), args.engine_version)
@@ -172,7 +180,6 @@ def main() -> int:
         else:
             print(payload)
         return 0
-
     if args.command in {"authority", "attack-paths"}:
         graph, _ = _scan(args.target)
         if args.command == "authority":
@@ -187,18 +194,11 @@ def main() -> int:
                 payload["findings"] = correlated_findings(graph, args.principal, args.max_hops, args.max_depth)
         print(json.dumps(payload, indent=2, default=str))
         return 0
-
     if args.command == "scan":
         graph, observations = _scan(args.target)
         payload: dict[str, object] = {
-            "entities": [
-                {"id": e.id, "kind": e.kind.value, "name": e.name, "properties": dict(e.properties)}
-                for e in graph.entities.values()
-            ],
-            "relationships": [
-                {"source": r.source_id, "kind": r.kind.value, "target": r.target_id, "properties": dict(r.properties)}
-                for r in graph.relationships
-            ],
+            "entities": [{"id": e.id, "kind": e.kind.value, "name": e.name, "properties": dict(e.properties)} for e in graph.entities.values()],
+            "relationships": [{"source": r.source_id, "kind": r.kind.value, "target": r.target_id, "properties": dict(r.properties)} for r in graph.relationships],
             "observations": [o.message for o in observations],
             "analysis_engine": "rust",
         }
@@ -212,18 +212,9 @@ def main() -> int:
             payload["blast_radius"] = blast_radius(graph, args.max_depth)
         if args.runtime:
             runtime_result = discover_local_runtime(include_connections=args.runtime_network)
-            payload["runtime"] = {
-                "entities": [
-                    {"id": e.id, "kind": e.kind.value, "name": e.name, "properties": dict(e.properties)}
-                    for e in runtime_result.entities
-                ],
-                "observations": [o.message for o in runtime_result.observations],
-            }
+            payload["runtime"] = {"entities": [{"id": e.id, "kind": e.kind.value, "name": e.name, "properties": dict(e.properties)} for e in runtime_result.entities], "observations": [o.message for o in runtime_result.observations]}
         if args.behavior_events:
-            events = _load_events(args.behavior_events)
-            from .native_bridge import build_native_graph
-            native = build_native_graph(graph)
-            behavior_findings = json.loads(native.correlate_behavior_json(json.dumps(events), 8, args.max_depth))
+            behavior_findings = correlate_behavior(graph, _load_events(args.behavior_events), 8, args.max_depth)
             payload["behavior_findings"] = behavior_findings
         if args.save_baseline:
             snapshot = snapshot_graph(graph)
@@ -231,13 +222,11 @@ def main() -> int:
             payload["baseline"] = {"digest": snapshot.digest, "verified": verify_snapshot(snapshot)}
         if args.compare_baseline:
             payload["drift"] = drift_findings(graph, load_snapshot(args.compare_baseline))
-        print(json.dumps(payload, indent=2, default=str) if args.as_json else json.dumps(payload, indent=2, default=str))
-
+        print(json.dumps(payload, indent=2, default=str))
         if args.fail_on_risk:
             findings = list(payload.get("policy_findings", [])) + list(payload.get("behavior_findings", []))
             return _risk_exit(findings)
         return 0
-
     build_parser().print_help()
     return 0
 
