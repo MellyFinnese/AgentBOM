@@ -2,6 +2,23 @@
 
 AgentBOM has two contracts: the **format contract** and the **implementation contract**.
 
+## Installation
+
+For normal use, install the published PyPI distribution:
+
+```bash
+python -m pip install agentbom-official
+agentbom --version
+```
+
+The distribution is named `agentbom-official` on PyPI, while the installed CLI command remains `agentbom`.
+
+For development from source, install the repository in editable mode with a working Rust toolchain pinned by `rust-toolchain.toml`:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
 ## Format first
 
 Changes under `schema/` are interoperability changes. Do not couple schema evolution to CLI release cadence. Add or update schema fixtures, changelog entries, and compatibility tests with every schema change.
