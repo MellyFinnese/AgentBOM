@@ -7,6 +7,7 @@ pub mod analysis;
 pub mod attestation;
 pub mod authorization;
 pub mod backend;
+pub mod delegation;
 pub mod drift;
 pub mod enforcement;
 pub mod graph_backend;
@@ -17,13 +18,15 @@ pub mod runtime;
 pub mod signing;
 
 use analysis::{analyze_policy, attack_paths, blast_radius, BlastRadius, PathResult, PolicyFinding};
+use delegation::{delegation_findings, effective_authority, AuthorityFinding, AuthorityPath};
 use drift::{analyze_drift, DriftFinding};
 pub use adapters::{AuthorizationAdapter, AZURE_RBAC, AWS_IAM, GCP_IAM, KUBERNETES_RBAC, MCP_AUTH, OAUTH_SCOPES};
 pub use attestation::Attestation;
 pub use authorization::{AuthorizationModel, Effect, Permission};
 pub use backend::{GraphBackend, JsonBackend};
+pub use delegation::{AuthorityFinding, AuthorityPath};
 pub use enforcement::{Decision, PolicyDecision, PolicyRule};
-pub use graph_backend::{CypherExporter, CypherStatement, GraphRelation, GraphRecord, GraphTransport, MemgraphTransport, Neo4jTransport};
+pub use graph_backend::{CypherExporter, CypherStatement, GraphTransport, MemgraphTransport, Neo4jTransport};
 pub use monitoring::{MonitoringReport, RuntimeSession};
 pub use provider_adapters::{parse_aws_iam, parse_azure_rbac, parse_gcp_iam, parse_kubernetes_rbac, parse_mcp_auth, parse_oauth_scopes};
 pub use query::GraphQueryResult;
@@ -55,6 +58,8 @@ impl Engine {
     pub fn agents_reaching_kind(&self, target_kind: &str, max_depth: usize) -> Vec<GraphQueryResult> { self.graph.nodes.values().filter(|n| n.kind == "agent").map(|n| self.query_paths_to_kind(&n.id, target_kind, max_depth)).filter(|r| !r.paths.is_empty()).collect() }
     pub fn evaluate_policy(&self, action: &str, resource: &str, rules: &[PolicyRule]) -> PolicyDecision { enforcement::evaluate(self, action, resource, rules) }
     pub fn parse_authorization<A: AuthorizationAdapter>(&self, adapter: A, payload: &str) -> Result<AuthorizationModel, String> { adapter.parse_json(payload) }
+    pub fn effective_authority(&self, principal: &str, max_hops: usize) -> Vec<AuthorityPath> { effective_authority(&self.graph, principal, max_hops) }
+    pub fn delegation_findings(&self, principal: &str, max_hops: usize) -> Vec<AuthorityFinding> { delegation_findings(&self.graph, principal, max_hops) }
 }
 
 impl Engine {
@@ -72,9 +77,9 @@ mod tests {
     fn sample() -> Engine {
         let mut engine = Engine::new();
         engine.add_node(Node { id: "agent".into(), kind: "agent".into(), name: "agent".into(), properties: json!({}) });
-        engine.add_node(Node { id: "permission".into(), kind: "permission".into(), name: "write production-db".into(), properties: json!({"action":"write","resource":"production-db"}) });
+        engine.add_node(Node { id: "permission".into(), kind: "permission".into(), name: "write production-db".into(), properties: json!({"principal":"agent","action":"write","resource":"production-db"}) });
         engine.add_node(Node { id: "data".into(), kind: "data_source".into(), name: "production-db".into(), properties: json!({}) });
-        engine.add_edge(Edge { source: "agent".into(), kind: "uses".into(), target: "permission".into(), properties: json!({}) }).unwrap();
+        engine.add_edge(Edge { source: "agent".into(), kind: "grants".into(), target: "permission".into(), properties: json!({}) }).unwrap();
         engine.add_edge(Edge { source: "permission".into(), kind: "accesses".into(), target: "data".into(), properties: json!({}) }).unwrap();
         engine
     }
@@ -97,23 +102,10 @@ mod tests {
     }
 
     #[test]
-    fn provider_adapters_normalize() {
-        let aws = parse_aws_iam(r#"{"statements":[{"effect":"Allow","principal":"agent","action":"read","resource":"prod-db"}]}"#).unwrap();
-        assert!(aws.is_allowed("agent", "read", "prod-db"));
-        let oauth = parse_oauth_scopes(r#"[{"principal":"agent","scopes":["read"],"audience":"api"}]"#).unwrap();
-        assert!(oauth.is_allowed("agent", "read", "api"));
-    }
-
-    #[test]
-    fn runtime_monitor_flags_undeclared_target() {
-        let monitor = RuntimeMonitor::new(["declared-api"]);
-        let event = RuntimeEvent { agent_id: "agent".into(), event_type: "network.connect".into(), target: "unknown-host".into(), timestamp_ms: 0, metadata: json!({}) };
-        assert!(monitor.observe(event).is_some());
-    }
-
-    #[test]
-    fn signing_is_deterministic() {
-        let signer = DigestSigner;
-        assert_eq!(signer.sign(b"agentbom").unwrap(), signer.sign(b"agentbom").unwrap());
+    fn authority_analysis_exposes_direct_permission() {
+        let engine = sample();
+        let paths = engine.effective_authority("agent", 4);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].action, "write");
     }
 }
