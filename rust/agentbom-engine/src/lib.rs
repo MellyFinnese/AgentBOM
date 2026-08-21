@@ -31,7 +31,7 @@ pub use delegation::{delegation_findings, effective_authority, AuthorityFinding,
 pub use enforcement::{Decision, PolicyDecision, PolicyRule};
 pub use gateway::{AuditEvent, EnforcementDecision, EnforcementGateway, ToolRequest};
 pub use graph_backend::{CypherExporter, CypherStatement, GraphTransport, MemgraphTransport, Neo4jTransport};
-pub use mcp_gateway::{McpGateway, McpGatewayResult, McpToolCall};
+pub use mcp_gateway::{McpGateway, McpGatewayResult, McpToolCall, McpToolDefinition};
 pub use monitoring::{MonitoringReport, RuntimeSession};
 pub use provider_adapters::{parse_aws_iam, parse_azure_rbac, parse_gcp_iam, parse_kubernetes_rbac, parse_mcp_auth, parse_oauth_scopes};
 pub use query::GraphQueryResult;
@@ -70,6 +70,7 @@ impl Engine {
     pub fn correlate_behavior(&self, event: &RuntimeEvent, max_hops: usize, max_depth: usize) -> Vec<BehaviorFinding> { correlate_behavior(&self.graph, event, max_hops, max_depth) }
     pub fn enforce_request(&self, request: &ToolRequest, rules: &[PolicyRule]) -> EnforcementDecision { EnforcementGateway.evaluate(&EnforcementGateway, self, request, rules) }
     pub fn inspect_mcp_call(&self, call: &McpToolCall, action: &str, resource: &str, rules: &[PolicyRule]) -> McpGatewayResult { McpGateway.inspect(&McpGateway, self, call, action, resource, rules) }
+    pub fn inspect_mcp_call_with_definitions(&self, call: &McpToolCall, definitions: &[McpToolDefinition], action_override: Option<&str>, resource_override: Option<&str>, rules: &[PolicyRule]) -> McpGatewayResult { McpGateway.inspect_with_definitions(&McpGateway, self, call, definitions, action_override, resource_override, rules) }
 }
 
 impl Engine {
