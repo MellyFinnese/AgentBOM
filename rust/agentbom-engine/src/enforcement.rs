@@ -37,5 +37,45 @@ pub fn evaluate(_engine: &Engine, action: &str, resource: &str, rules: &[PolicyR
 }
 
 fn matches_pattern(pattern: &str, value: &str) -> bool {
-    pattern == "*" || pattern.eq_ignore_ascii_case(value)
+    if pattern == "*" || pattern.eq_ignore_ascii_case(value) {
+        return true;
+    }
+    let parts = pattern.split('*').collect::<Vec<_>>();
+    if parts.len() == 1 {
+        return false;
+    }
+    let mut remainder = value;
+    if !parts[0].is_empty() {
+        if !remainder.to_ascii_lowercase().starts_with(&parts[0].to_ascii_lowercase()) {
+            return false;
+        }
+        remainder = &remainder[parts[0].len()..];
+    }
+    for (index, part) in parts.iter().enumerate().skip(1) {
+        if part.is_empty() {
+            continue;
+        }
+        let is_last = index == parts.len() - 1;
+        let lower = remainder.to_ascii_lowercase();
+        let needle = part.to_ascii_lowercase();
+        if is_last {
+            return lower.ends_with(&needle);
+        }
+        let Some(position) = lower.find(&needle) else { return false; };
+        remainder = &remainder[position + part.len()..];
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wildcard_patterns_match_subresources() {
+        assert!(matches_pattern("production/*", "production/db"));
+        assert!(matches_pattern("prod-*", "prod-db"));
+        assert!(matches_pattern("*/write", "database/write"));
+        assert!(!matches_pattern("production/*", "staging/db"));
+    }
 }
