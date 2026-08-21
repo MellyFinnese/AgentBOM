@@ -12,11 +12,22 @@ AgentBOM can inspect an MCP-style JSON manifest without executing the configured
 agentbom scan ./mcp.json
 agentbom scan ./mcp.json --auth
 agentbom scan ./mcp.json --paths
-agentbom scan ./mcp.json --auth --paths
-agentbom scan ./mcp.json --json --auth --paths
+agentbom scan ./mcp.json --policy
+agentbom scan ./mcp.json --auth --paths --policy
+agentbom scan ./mcp.json --json --auth --paths --policy
 ```
 
-Discovery normalizes declared agents, MCP servers, tools, credentials, capabilities, identities, permission grants, and resource scope into the AgentBOM graph. A bounded traversal engine then identifies reachable high-impact entities.
+Discovery normalizes declared agents, MCP servers, tools, credentials, capabilities, identities, permission grants, and resource scope into the AgentBOM graph.
+
+The deterministic policy engine currently detects:
+
+- wildcard authorization grants
+- production write/delete/admin/execute authority
+- credentials referenced by configuration
+- dangerous tool capabilities
+- reachable high-impact resources through graph paths
+
+Every policy finding includes a stable rule ID, severity, affected entity IDs, description, and evidence that can be rendered as JSON for CI or downstream tooling.
 
 Example privilege chain:
 
@@ -57,12 +68,15 @@ Agent
                 |  Security Graph   |
                 +---------+--------+
                           |
-            +-------------+-------------+
-            |             |             |
-            v             v             v
-          Risk      Authorization   Attack Paths
-            |             |             |
-            +-------------+-------------+
+          +---------------+---------------+
+          |               |               |
+          v               v               v
+        Risk        Authorization       Policy
+          |               |               |
+          +---------------+---------------+
+                          |
+                          v
+                     Attack Paths
                           |
                           v
                      Blast Radius
@@ -81,11 +95,11 @@ Agent
 - **Authority-aware:** identity, credentials, permission grants, effects, conditions, and resource scope are first-class concepts.
 - **Evidence-backed:** discoveries retain source and provenance metadata.
 - **Graph-native:** relationships are part of the security model, not an enrichment step.
-- **Deterministic:** analysis is reproducible and bounded.
+- **Deterministic:** policy and path analysis are reproducible and bounded.
 - **Backend-neutral:** local analysis does not require a graph database.
 - **Extensible discovery:** MCP, configuration, runtime, and cloud sources can feed the same model.
 - **Safe discovery:** configuration inspection does not execute arbitrary agent or MCP code.
 
 ## Status
 
-Early active development. The discovery-to-graph-to-attack-path pipeline and explicit authorization model are now in place. Next layers are richer IAM/API authorization ingestion, runtime discovery, policy analysis, blast-radius scoring, and graph backends.
+Early active development. The first discovery-to-graph-to-authorization-to-policy pipeline is in place. The next major layers are richer IAM/API authorization ingestion, runtime discovery, blast-radius scoring, and graph backends.
