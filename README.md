@@ -10,13 +10,15 @@ AgentBOM can inspect an MCP-style JSON manifest without executing the configured
 
 ```bash
 agentbom scan ./mcp.json
+agentbom scan ./mcp.json --auth
 agentbom scan ./mcp.json --paths
-agentbom scan ./mcp.json --json --paths
+agentbom scan ./mcp.json --auth --paths
+agentbom scan ./mcp.json --json --auth --paths
 ```
 
-Discovery normalizes declared agents, MCP servers, tools, credentials, capabilities, and data resources into the AgentBOM graph. The authorization layer can then represent identities, credentials, explicit permission grants, resource scope, and delegation/assumption relationships. A bounded traversal engine identifies reachable high-impact entities.
+Discovery normalizes declared agents, MCP servers, tools, credentials, capabilities, identities, permission grants, and resource scope into the AgentBOM graph. A bounded traversal engine then identifies reachable high-impact entities.
 
-Example security chain:
+Example privilege chain:
 
 ```text
 Agent
@@ -24,6 +26,18 @@ Agent
       -> Credential
           -> Permission
               -> Production Data
+```
+
+Example attack path:
+
+```text
+Agent
+  -> MCP Server
+      -> Tool
+          -> Identity
+              -> Credential
+                  -> Permission
+                      -> Resource
 ```
 
 ## Architecture
@@ -43,15 +57,15 @@ Agent
                 |  Security Graph   |
                 +---------+--------+
                           |
-             +------------+------------+
-             |            |            |
-             v            v            v
-           Risk      Authorization   Attack Paths
-             |            |            |
-             +------------+------------+
+            +-------------+-------------+
+            |             |             |
+            v             v             v
+          Risk      Authorization   Attack Paths
+            |             |             |
+            +-------------+-------------+
                           |
                           v
-                    Blast Radius
+                     Blast Radius
                           |
                           v
                        Evidence
@@ -64,7 +78,7 @@ Agent
 
 - **Domain-first:** the security model comes before integrations.
 - **Capability-aware:** capabilities and authorization are modeled explicitly.
-- **Authority-aware:** identity, credentials, grants, resource scope, assumption, and delegation are first-class concepts.
+- **Authority-aware:** identity, credentials, permission grants, effects, conditions, and resource scope are first-class concepts.
 - **Evidence-backed:** discoveries retain source and provenance metadata.
 - **Graph-native:** relationships are part of the security model, not an enrichment step.
 - **Deterministic:** analysis is reproducible and bounded.
@@ -74,4 +88,4 @@ Agent
 
 ## Status
 
-Early active development. The discovery-to-graph-to-attack-path pipeline and explicit authorization model are now in place. Next layers are richer authorization ingestion, runtime discovery, policy analysis, blast-radius scoring, and graph backends.
+Early active development. The discovery-to-graph-to-attack-path pipeline and explicit authorization model are now in place. Next layers are richer IAM/API authorization ingestion, runtime discovery, policy analysis, blast-radius scoring, and graph backends.
