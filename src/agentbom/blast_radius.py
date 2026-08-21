@@ -67,23 +67,26 @@ def analyze_blast_radius(
     max_depth = max(1, max_depth)
     queue: deque[tuple[str, int]] = deque([(origin.id, 0)])
     distance: dict[str, int] = {origin.id: 0}
+    # Count only shortest paths to each node. Longer walks, including cyclic walks,
+    # never contribute to path_count and therefore cannot inflate the risk score.
     path_counts: dict[str, int] = {origin.id: 1}
 
     while queue:
         current_id, depth = queue.popleft()
         if depth >= max_depth:
             continue
+        current_distance = distance[current_id]
+        current_paths = path_counts[current_id]
         for relation in graph.outgoing(current_id):
             target_id = relation.target_id
-            next_depth = depth + 1
-            path_counts[target_id] = path_counts.get(target_id, 0) + path_counts.get(current_id, 1)
+            next_depth = current_distance + 1
             previous = distance.get(target_id)
             if previous is None:
                 distance[target_id] = next_depth
+                path_counts[target_id] = current_paths
                 queue.append((target_id, next_depth))
-            elif next_depth < previous:
-                distance[target_id] = next_depth
-                queue.append((target_id, next_depth))
+            elif next_depth == previous:
+                path_counts[target_id] = path_counts.get(target_id, 0) + current_paths
 
     resources: list[ImpactedResource] = []
     for entity_id, dist in distance.items():
