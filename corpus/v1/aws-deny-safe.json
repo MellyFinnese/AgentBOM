@@ -1,0 +1,9 @@
+{
+  "case_id": "aws-deny-safe",
+  "provider": "aws",
+  "class": "safe",
+  "description": "Explicit deny prevents an otherwise broad read request from reaching the protected resource.",
+  "input": {"principal": "agent-role", "action": "s3:GetObject", "resource": "arn:aws:s3:::production/*", "decision": "deny"},
+  "expected_findings": [],
+  "expected_behavior": "deny"
+}
