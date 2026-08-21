@@ -1,8 +1,8 @@
 """Offline discovery for MCP-style agent configuration manifests.
 
 This adapter intentionally does not execute MCP servers. It inspects local JSON
-configuration and turns declared agents, servers, tools, credentials, and data
-resources into the neutral AgentBOM graph model.
+configuration and turns declared agents, servers, tools, identities, credentials,
+permissions, and data resources into the neutral AgentBOM graph model.
 """
 
 from __future__ import annotations
@@ -51,6 +51,28 @@ def _capabilities(raw: Any) -> list[Capability]:
     return result
 
 
+def _iter_named(value: Any) -> list[tuple[str, Mapping[str, Any]]]:
+    if isinstance(value, Mapping):
+        return [(str(name), item) for name, item in value.items() if isinstance(item, Mapping)]
+    if isinstance(value, list):
+        result: list[tuple[str, Mapping[str, Any]]] = []
+        for item in value:
+            if isinstance(item, Mapping):
+                name = item.get("name") or item.get("id")
+                if name is not None:
+                    result.append((str(name), item))
+        return result
+    return []
+
+
+def _permission_defs(raw: Any) -> list[Mapping[str, Any]]:
+    if isinstance(raw, Mapping):
+        return [raw]
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, Mapping)]
+    return []
+
+
 def discover_mcp_config(path: Path) -> DiscoveryResult:
     """Parse one MCP/agent JSON manifest without executing arbitrary code."""
     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -67,13 +89,81 @@ def discover_mcp_config(path: Path) -> DiscoveryResult:
         return entity
 
     def relate(source: Entity, relation: RelationKind, target: Entity, **properties: object) -> None:
-        relationships.append(
-            Relationship(source.id, relation, target.id, properties=properties)
-        )
+        relationship = Relationship(source.id, relation, target.id, properties=properties)
+        if relationship not in relationships:
+            relationships.append(relationship)
 
     servers = raw.get("mcpServers", {})
     if not isinstance(servers, Mapping):
         servers = {}
+
+    identity_defs = dict(_iter_named(raw.get("identities", {})))
+    credential_defs = dict(_iter_named(raw.get("credentials", {})))
+    permission_defs = dict(_iter_named(raw.get("permissions", {})))
+
+    def add_authorization(identity_name: str, credential_name: str | None, grants: list[Mapping[str, Any]], provider: object = None) -> None:
+        identity = add(
+            EntityKind.IDENTITY,
+            identity_name,
+            provider=provider,
+            source=str(path),
+        )
+        if credential_name:
+            credential = add(
+                EntityKind.CREDENTIAL,
+                credential_name,
+                provider=provider,
+                source=str(path),
+            )
+            relate(identity, RelationKind.AUTHENTICATES_AS, credential)
+        else:
+            credential = None
+
+        for index, grant in enumerate(grants):
+            action = str(grant.get("action") or grant.get("operation") or grant.get("scope") or "unknown")
+            resource = str(grant.get("resource") or grant.get("resource_uri") or grant.get("audience") or "*")
+            effect = str(grant.get("effect") or "allow").lower()
+            permission = add(
+                EntityKind.PERMISSION,
+                f"{identity_name}:{action}:{resource}:{index}",
+                action=action,
+                resource=resource,
+                effect=effect,
+                conditions=dict(grant.get("conditions") or {}),
+                provider=provider,
+                source=str(path),
+            )
+            grant_source = credential or identity
+            relate(grant_source, RelationKind.GRANTS, permission)
+            resource_entity = add(
+                EntityKind.DATA_SOURCE,
+                resource,
+                authorization_scope=resource,
+                source=str(path),
+            )
+            relate(permission, RelationKind.ACCESSES, resource_entity, action=action, effect=effect)
+
+    for identity_name, definition in identity_defs.items():
+        credential_name = definition.get("credential") or definition.get("credentialRef")
+        if credential_name is not None and str(credential_name) in credential_defs:
+            credential_name = str(credential_name)
+        elif credential_name is None:
+            credential_name = None
+        grants_raw = definition.get("permissions") or definition.get("grants") or []
+        grants: list[Mapping[str, Any]] = []
+        for grant in _permission_defs(grants_raw):
+            if "ref" in grant and str(grant["ref"]) in permission_defs:
+                grants.extend(_permission_defs(permission_defs[str(grant["ref"])].get("grant") or permission_defs[str(grant["ref"])].get("permissions") or permission_defs[str(grant["ref"]) ]))
+            else:
+                grants.append(grant)
+        add_authorization(identity_name, str(credential_name) if credential_name else None, grants, definition.get("provider"))
+
+    for credential_name, definition in credential_defs.items():
+        identity_name = definition.get("identity") or definition.get("principal")
+        if identity_name:
+            identity = add(EntityKind.IDENTITY, str(identity_name), source=str(path))
+            credential = add(EntityKind.CREDENTIAL, credential_name, provider=definition.get("provider"), source=str(path))
+            relate(identity, RelationKind.AUTHENTICATES_AS, credential)
 
     agent_defs = raw.get("agents", [])
     if isinstance(agent_defs, Mapping):
@@ -86,6 +176,28 @@ def discover_mcp_config(path: Path) -> DiscoveryResult:
             continue
         agent_name = str(agent_def.get("name") or "unnamed-agent")
         agent = add(EntityKind.AGENT, agent_name, source=str(path))
+
+        identity_name = agent_def.get("identity") or agent_def.get("principal")
+        if identity_name:
+            identity_name = str(identity_name)
+            identity = add(EntityKind.IDENTITY, identity_name, source=str(path))
+            relate(agent, RelationKind.AUTHENTICATES_AS, identity)
+
+        for grant in _permission_defs(agent_def.get("permissions") or agent_def.get("scopes") or []):
+            action = str(grant.get("action") or grant.get("scope") or grant.get("operation") or "unknown")
+            resource = str(grant.get("resource") or grant.get("audience") or "*")
+            permission = add(
+                EntityKind.PERMISSION,
+                f"{agent_name}:{action}:{resource}",
+                action=action,
+                resource=resource,
+                effect=str(grant.get("effect") or "allow").lower(),
+                source=str(path),
+            )
+            relate(agent, RelationKind.GRANTS, permission)
+            resource_entity = add(EntityKind.DATA_SOURCE, resource, authorization_scope=resource, source=str(path))
+            relate(permission, RelationKind.ACCESSES, resource_entity, action=action)
+
         configured_servers = agent_def.get("mcpServers", list(servers.keys()))
         if isinstance(configured_servers, str):
             configured_servers = [configured_servers]
@@ -180,6 +292,6 @@ class MCPConfigSource:
             combined_observations.extend(result.observations)
         return DiscoveryResult(
             tuple(combined_entities.values()),
-            tuple(combined_relationships),
+            tuple(dict.fromkeys(combined_relationships)),
             tuple(combined_observations),
         )
