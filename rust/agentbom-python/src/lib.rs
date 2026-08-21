@@ -1,5 +1,5 @@
 use agentbom_core::{Edge, Node};
-use agentbom_engine::{AttestationSigner, CypherExporter, Engine, PolicyRule, RuntimeEvent, ToolRequest};
+use agentbom_engine::{AttestationSigner, CypherExporter, Engine, McpToolCall, PolicyRule, RuntimeEvent, ToolRequest};
 use pyo3::prelude::*;
 
 #[pyclass]
@@ -46,6 +46,11 @@ impl NativeGraph {
         let request: ToolRequest = serde_json::from_str(&request_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
         let rules: Vec<PolicyRule> = serde_json::from_str(&rules_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
         serde_json::to_string(&self.inner.enforce_request(&request, &rules)).map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+    fn inspect_mcp_call_json(&self, call_json: String, action: String, resource: String, rules_json: String) -> PyResult<String> {
+        let call: McpToolCall = serde_json::from_str(&call_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let rules: Vec<PolicyRule> = serde_json::from_str(&rules_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        serde_json::to_string(&self.inner.inspect_mcp_call(&call, &action, &resource, &rules)).map_err(pyo3::exceptions::PyValueError::new_err)
     }
     fn cypher_json(&self) -> PyResult<String> { serde_json::to_string(&CypherExporter::export(&self.inner).map_err(pyo3::exceptions::PyValueError::new_err)?).map_err(pyo3::exceptions::PyValueError::new_err) }
     fn policy_decision_json(&self, action: String, resource: String, rules_json: String) -> PyResult<String> { let rules: Vec<PolicyRule> = serde_json::from_str(&rules_json).map_err(pyo3::exceptions::PyValueError::new_err)?; serde_json::to_string(&self.inner.evaluate_policy(&action, &resource, &rules)).map_err(pyo3::exceptions::PyValueError::new_err) }
