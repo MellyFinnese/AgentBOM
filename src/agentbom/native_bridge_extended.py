@@ -12,6 +12,10 @@ def runtime_monitor_json(declared_targets: list[str], events: list[dict[str, Any
     native = _require_native()()
     return json.loads(native.monitor_runtime_json(json.dumps(declared_targets), json.dumps(events)))
 
+def correlate_behavior(graph: Any, events: list[dict[str, Any]], max_hops: int = 8, max_depth: int = 8) -> list[dict[str, Any]]:
+    native = build_native_graph(graph)
+    return json.loads(native.correlate_behavior_json(json.dumps(events, sort_keys=True), max_hops, max_depth))
+
 def export_cypher(graph: Any) -> list[dict[str, Any]]:
     return json.loads(build_native_graph(graph).cypher_json())
 
