@@ -26,7 +26,7 @@ def test_new_read_access_to_production_database_is_high_or_critical() -> None:
     assert added[0].severity in {"high", "critical"}
 
 
-def test_new_read_access_to_credential_store_is_high() -> None:
+def test_new_read_access_to_credential_store_is_critical() -> None:
     previous_graph = InMemoryGraph()
     current_graph = InMemoryGraph()
     agent = Entity(EntityKind.AGENT, "coding-agent", id="agent:coding")
@@ -39,4 +39,4 @@ def test_new_read_access_to_credential_store_is_high() -> None:
     findings = compare_snapshots(snapshot_graph(previous_graph), snapshot_graph(current_graph))
     added = [finding for finding in findings if finding.drift_type.value == "added_relationship"]
 
-    assert added[0].severity == "high"
+    assert added[0].severity == "critical"
