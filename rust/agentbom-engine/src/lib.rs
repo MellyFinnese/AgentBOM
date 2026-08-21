@@ -24,7 +24,7 @@ use analysis::{analyze_policy, attack_paths, blast_radius, BlastRadius, PathResu
 use drift::{analyze_drift, DriftFinding};
 pub use adapters::{AuthorizationAdapter, AZURE_RBAC, AWS_IAM, GCP_IAM, KUBERNETES_RBAC, MCP_AUTH, OAUTH_SCOPES};
 pub use attestation::Attestation;
-pub use authorization::{AuthorizationModel, Effect, Permission};
+pub use authorization::{AuthorizationDecision, AuthorizationModel, Effect, Permission};
 pub use backend::{GraphBackend, JsonBackend};
 pub use correlation::{BehaviorFinding, correlate_behavior, correlate_findings, correlated_security_paths, CorrelatedFinding, SecurityPath};
 pub use delegation::{delegation_findings, effective_authority, AuthorityFinding, AuthorityPath};
@@ -46,9 +46,10 @@ pub struct EngineSummary { pub node_count: usize, pub edge_count: usize, pub sna
 
 impl Engine {
     pub fn new() -> Self { Self::default() }
-    pub fn add_node(&mut self, node: Node) { self.graph.add_node(node); }
+    pub fn add_node(&mut self, node: Node) { self.graph.add_node(node).expect("engine node must be valid"); }
     pub fn add_edge(&mut self, edge: Edge) -> Result<(), String> { self.graph.add_edge(edge) }
     pub fn reachable(&self, start: &str, max_depth: usize) -> Vec<Vec<String>> { self.graph.reachable(start, max_depth) }
+    pub fn reachable_mode(&self, start: &str, max_depth: usize, max_paths: usize, mode: &str) -> Vec<Vec<String>> { self.graph.reachable_limited_mode(start, max_depth, max_paths, mode) }
     pub fn snapshot_hash(&self) -> String { self.graph.snapshot_hash() }
     pub fn diff(&self, baseline: &Engine) -> GraphDiff { baseline.graph.diff(&self.graph) }
     pub fn summary(&self) -> EngineSummary { EngineSummary { node_count: self.graph.nodes.len(), edge_count: self.graph.edges.len(), snapshot_hash: self.snapshot_hash() } }
@@ -75,7 +76,7 @@ impl Engine {
 
 impl Engine {
     fn query_paths_to_kind(&self, start: &str, target_kind: &str, max_depth: usize) -> GraphQueryResult {
-        let paths = self.graph.reachable(start, max_depth).into_iter().filter(|path| path.last().and_then(|id| self.graph.nodes.get(id)).map(|node| node.kind.as_str() == target_kind).unwrap_or(false)).collect();
+        let paths = self.graph.reachable_limited_mode(start, max_depth, 10_000, "can").into_iter().filter(|path| path.last().and_then(|id| self.graph.nodes.get(id)).map(|node| node.kind.as_str() == target_kind).unwrap_or(false)).collect();
         GraphQueryResult { start: start.into(), target_kind: Some(target_kind.into()), paths }
     }
 }
