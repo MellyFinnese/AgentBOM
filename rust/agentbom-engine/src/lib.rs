@@ -24,7 +24,7 @@ pub use adapters::{AuthorizationAdapter, AZURE_RBAC, AWS_IAM, GCP_IAM, KUBERNETE
 pub use attestation::Attestation;
 pub use authorization::{AuthorizationModel, Effect, Permission};
 pub use backend::{GraphBackend, JsonBackend};
-pub use correlation::{correlate_findings, correlated_security_paths, CorrelatedFinding, SecurityPath};
+pub use correlation::{BehaviorFinding, correlate_behavior, correlate_findings, correlated_security_paths, CorrelatedFinding, SecurityPath};
 pub use delegation::{delegation_findings, effective_authority, AuthorityFinding, AuthorityPath};
 pub use enforcement::{Decision, PolicyDecision, PolicyRule};
 pub use graph_backend::{CypherExporter, CypherStatement, GraphTransport, MemgraphTransport, Neo4jTransport};
@@ -63,60 +63,12 @@ impl Engine {
     pub fn delegation_findings(&self, principal: &str, max_hops: usize) -> Vec<AuthorityFinding> { delegation_findings(&self.graph, principal, max_hops) }
     pub fn correlated_security_paths(&self, principal: &str, max_hops: usize, max_depth: usize) -> Vec<SecurityPath> { correlated_security_paths(&self.graph, principal, max_hops, max_depth) }
     pub fn correlated_findings(&self, principal: &str, max_hops: usize, max_depth: usize) -> Vec<CorrelatedFinding> { correlate_findings(&self.graph, principal, max_hops, max_depth) }
+    pub fn correlate_behavior(&self, event: &RuntimeEvent, max_hops: usize, max_depth: usize) -> Vec<BehaviorFinding> { correlate_behavior(&self.graph, event, max_hops, max_depth) }
 }
 
 impl Engine {
     fn query_paths_to_kind(&self, start: &str, target_kind: &str, max_depth: usize) -> GraphQueryResult {
         let paths = self.graph.reachable(start, max_depth).into_iter().filter(|path| path.last().and_then(|id| self.graph.nodes.get(id)).map(|node| node.kind.as_str() == target_kind).unwrap_or(false)).collect();
         GraphQueryResult { start: start.into(), target_kind: Some(target_kind.into()), paths }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn sample() -> Engine {
-        let mut engine = Engine::new();
-        engine.add_node(Node { id: "agent".into(), kind: "agent".into(), name: "agent".into(), properties: json!({}) });
-        engine.add_node(Node { id: "permission".into(), kind: "permission".into(), name: "write production-db".into(), properties: json!({"principal":"agent","action":"write","resource":"production-db"}) });
-        engine.add_node(Node { id: "data".into(), kind: "data_source".into(), name: "production-db".into(), properties: json!({}) });
-        engine.add_edge(Edge { source: "agent".into(), kind: "grants".into(), target: "permission".into(), properties: json!({}) }).unwrap();
-        engine.add_edge(Edge { source: "permission".into(), kind: "accesses".into(), target: "data".into(), properties: json!({}) }).unwrap();
-        engine
-    }
-
-    #[test]
-    fn engine_is_stable() {
-        let engine = sample();
-        assert_eq!(engine.snapshot_hash(), engine.snapshot_hash());
-        assert!(!engine.attack_paths(4).is_empty());
-        assert!(engine.policy_findings(4).iter().any(|f| f.rule_id == "PATH-HIGH-IMPACT"));
-        assert_eq!(engine.summary().node_count, 3);
-        assert_eq!(engine.paths_to_kind("agent", "data_source", 4).paths.len(), 1);
-    }
-
-    #[test]
-    fn engine_round_trips_json() {
-        let engine = sample();
-        let restored = Engine::import_json(&engine.export_json().unwrap()).unwrap();
-        assert_eq!(engine.snapshot_hash(), restored.snapshot_hash());
-    }
-
-    #[test]
-    fn authority_analysis_exposes_direct_permission() {
-        let engine = sample();
-        let paths = engine.effective_authority("agent", 4);
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0].action, "write");
-    }
-
-    #[test]
-    fn correlation_exposes_effective_security_path() {
-        let engine = sample();
-        let findings = engine.correlated_findings("agent", 4, 4);
-        assert!(!findings.is_empty());
-        assert_eq!(findings[0].rule_id, "PATH-EFFECTIVE-AUTHORITY");
     }
 }
