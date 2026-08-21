@@ -65,7 +65,7 @@ mod tests {
             tool: "shell".into(),
             arguments: json!({"cmd":"id"}),
         };
-        let result = McpGateway.inspect(&McpGateway, &engine, &call, "execute", "shell", &rules);
+        let result = McpGateway::default().inspect(&engine, &call, "execute", "shell", &rules);
         assert!(!result.forward);
         assert_eq!(result.response_status, "deny");
     }
@@ -79,7 +79,7 @@ mod tests {
             tool: "read_file".into(),
             arguments: json!({"path":"README.md"}),
         };
-        let result = McpGateway.inspect(&McpGateway, &engine, &call, "read", "workspace", &[]);
+        let result = McpGateway::default().inspect(&engine, &call, "read", "workspace", &[]);
         assert!(result.forward);
         assert_eq!(result.response_status, "allow");
     }
