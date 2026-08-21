@@ -7,6 +7,7 @@ pub mod analysis;
 pub mod attestation;
 pub mod authorization;
 pub mod backend;
+pub mod correlation;
 pub mod delegation;
 pub mod drift;
 pub mod enforcement;
@@ -23,6 +24,7 @@ pub use adapters::{AuthorizationAdapter, AZURE_RBAC, AWS_IAM, GCP_IAM, KUBERNETE
 pub use attestation::Attestation;
 pub use authorization::{AuthorizationModel, Effect, Permission};
 pub use backend::{GraphBackend, JsonBackend};
+pub use correlation::{correlate_findings, correlated_security_paths, CorrelatedFinding, SecurityPath};
 pub use delegation::{delegation_findings, effective_authority, AuthorityFinding, AuthorityPath};
 pub use enforcement::{Decision, PolicyDecision, PolicyRule};
 pub use graph_backend::{CypherExporter, CypherStatement, GraphTransport, MemgraphTransport, Neo4jTransport};
@@ -59,6 +61,8 @@ impl Engine {
     pub fn parse_authorization<A: AuthorizationAdapter>(&self, adapter: A, payload: &str) -> Result<AuthorizationModel, String> { adapter.parse_json(payload) }
     pub fn effective_authority(&self, principal: &str, max_hops: usize) -> Vec<AuthorityPath> { effective_authority(&self.graph, principal, max_hops) }
     pub fn delegation_findings(&self, principal: &str, max_hops: usize) -> Vec<AuthorityFinding> { delegation_findings(&self.graph, principal, max_hops) }
+    pub fn correlated_security_paths(&self, principal: &str, max_hops: usize, max_depth: usize) -> Vec<SecurityPath> { correlated_security_paths(&self.graph, principal, max_hops, max_depth) }
+    pub fn correlated_findings(&self, principal: &str, max_hops: usize, max_depth: usize) -> Vec<CorrelatedFinding> { correlate_findings(&self.graph, principal, max_hops, max_depth) }
 }
 
 impl Engine {
@@ -106,5 +110,13 @@ mod tests {
         let paths = engine.effective_authority("agent", 4);
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].action, "write");
+    }
+
+    #[test]
+    fn correlation_exposes_effective_security_path() {
+        let engine = sample();
+        let findings = engine.correlated_findings("agent", 4, 4);
+        assert!(!findings.is_empty());
+        assert_eq!(findings[0].rule_id, "PATH-EFFECTIVE-AUTHORITY");
     }
 }
