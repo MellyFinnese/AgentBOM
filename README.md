@@ -56,6 +56,7 @@ AgentBOM can inspect an MCP-style JSON manifest without executing the configured
 agentbom scan ./mcp.json
 agentbom scan ./mcp.json --auth --paths --policy --blast-radius
 agentbom scan ./mcp.json --runtime --reconcile
+agentbom scan ./mcp.json --behavior-events events.json --fail-on-risk
 agentbom scan ./mcp.json --save-baseline .agentbom/baseline.json
 agentbom scan ./mcp.json --compare-baseline .agentbom/baseline.json
 ```
@@ -96,7 +97,35 @@ agentbom authority ./mcp.json agent-a --max-hops 8
 agentbom authority ./mcp.json agent-a --findings
 ```
 
-This is designed to expose transitive authority, inherited privileges, and wildcard authority before they become hidden attack paths.
+Correlate that authority with tools, permissions, and reachable resources:
+
+```bash
+agentbom attack-paths ./mcp.json agent-a --findings
+```
+
+This exposes transitive authority and shows the full graph path behind a risky finding.
+
+### Runtime behavior correlation
+
+Compare observed runtime events against the effective security graph:
+
+```bash
+agentbom behavior-check ./mcp.json events.json --findings
+agentbom behavior-check ./mcp.json events.json --fail-on-risk
+```
+
+Or include behavior correlation in a scan:
+
+```bash
+agentbom scan ./mcp.json --behavior-events events.json --fail-on-risk
+```
+
+The Rust engine distinguishes between:
+
+- **Observed behavior that matches a reachable attack path**
+- **Observed behavior that cannot be explained by the current security graph**
+
+High and critical behavior findings can fail CI with `--fail-on-risk`.
 
 ### Runtime, policy, graph, and attestation workflows
 
@@ -107,7 +136,7 @@ agentbom policy-check write production-db --rules policy.json
 agentbom attest ./mcp.json --output attestation.json
 ```
 
-The native Rust engine evaluates wildcard grants, production mutation authority, configuration-referenced credentials, dangerous tool capabilities, reachable high-impact resources, blast radius, graph drift, runtime anomalies, and delegated authority.
+The native Rust engine evaluates wildcard grants, production mutation authority, configuration-referenced credentials, dangerous tool capabilities, reachable high-impact resources, blast radius, graph drift, runtime anomalies, delegated authority, and observed runtime behavior.
 
 ## Architecture
 
@@ -127,7 +156,8 @@ The native Rust engine evaluates wildcard grants, production mutation authority,
                 | graph / identity / auth  |
                 | delegation / policy      |
                 | paths / blast / drift    |
-                | runtime / attestation   |
+                | runtime / behavior      |
+                | attestation             |
                 +-----------+-------------+
                             |
              +--------------+--------------+
@@ -142,7 +172,10 @@ The native Rust engine evaluates wildcard grants, production mutation authority,
         Blast Radius
              |
              v
-       Reporting / CI
+       Runtime Correlation
+             |
+             v
+       Reporting / CI / Enforcement
 ```
 
 ## Design principles
@@ -152,6 +185,7 @@ The native Rust engine evaluates wildcard grants, production mutation authority,
 - **Versioned format:** AgentBOM v1 defines a stable interchange document independent of the implementation language.
 - **Provider-neutral authorization:** cloud/IAM/OAuth/MCP permissions normalize into the same model.
 - **Delegation-aware:** effective authority is resolved across bounded delegation, assume, and impersonation relationships.
+- **Behavior-aware:** runtime activity is correlated against the modeled authority and attack graph.
 - **Domain-first:** the security model comes before integrations.
 - **Capability-aware:** capabilities and authorization are modeled explicitly.
 - **Authority-aware:** identity, credentials, permission grants, effects, conditions, and resource scope are first-class concepts.
@@ -159,10 +193,10 @@ The native Rust engine evaluates wildcard grants, production mutation authority,
 - **Temporal:** security changes are evaluated against verified baselines rather than raw text diffs.
 - **Evidence-backed:** discoveries retain source and provenance metadata.
 - **Graph-native:** relationships are part of the security model, not an enrichment step.
-- **Deterministic:** policy, path, blast-radius, reconciliation, delegation, snapshot, drift, and attestation operations are reproducible and bounded.
+- **Deterministic:** policy, path, blast-radius, reconciliation, delegation, behavior, snapshot, drift, and attestation operations are reproducible and bounded.
 - **Backend-neutral:** the engine can use JSON locally and can be extended to graph backends without changing the security model.
 - **Safe discovery:** configuration inspection and runtime discovery do not execute arbitrary agent or MCP code.
 
 ## Status
 
-Early active development. The Rust-native graph engine, AgentBOM v1 schema, authorization/delegation model, provider adapter boundary, stable engine API, C FFI, PyO3 binding, WASM binding, discovery, policy, attack-path, blast-radius, runtime monitoring, attestation, and temporal drift foundations are in place. Next major work is production-grade cloud/provider ingestion, concrete Memgraph/Neo4j persistence, continuous monitoring agents, and cryptographic attestation integrations.
+Early active development. The Rust-native graph engine, AgentBOM v1 schema, authorization/delegation model, provider adapter boundary, stable engine API, C FFI, PyO3 binding, WASM binding, discovery, policy, attack-path, blast-radius, runtime monitoring, behavior correlation, attestation, and temporal drift foundations are in place. Next major work is production-grade cloud/provider ingestion, concrete Memgraph/Neo4j persistence, continuous monitoring agents, enforcement adapters, and cryptographic attestation integrations.
