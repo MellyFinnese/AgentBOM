@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable
 
+from .risk import SENSITIVE_KINDS, relationship_severity
 from .snapshot import Snapshot, verify_snapshot
 
 
@@ -26,10 +27,6 @@ class DriftFinding:
     key: str
 
 
-SENSITIVE_KINDS = {"credential", "permission", "identity", "deployment", "database", "data_source"}
-HIGH_IMPACT_RELATIONS = {"grants", "accesses", "authenticates_as", "assumes", "delegates", "writes", "reads", "calls"}
-
-
 def compare_snapshots(previous: Snapshot, current: Snapshot) -> tuple[DriftFinding, ...]:
     if not verify_snapshot(previous):
         raise ValueError("Previous snapshot digest verification failed")
@@ -42,76 +39,39 @@ def compare_snapshots(previous: Snapshot, current: Snapshot) -> tuple[DriftFindi
     previous_relationships = {_relationship_key(item): item for item in previous.relationships}
     current_relationships = {_relationship_key(item): item for item in current.relationships}
 
+    sensitive_kinds = {item.value for item in SENSITIVE_KINDS}
     for key in sorted(current_entities.keys() - previous_entities.keys()):
         entity = current_entities[key]
         kind = str(entity.get("kind", "unknown"))
-        severity = "high" if kind in SENSITIVE_KINDS else "medium"
-        findings.append(
-            DriftFinding(
-                DriftType.ADDED_ENTITY,
-                severity,
-                f"New {kind} appeared",
-                f"Entity {entity.get('name', key)} was not present in the previous baseline.",
-                key,
-            )
-        )
+        severity = "high" if kind in sensitive_kinds else "medium"
+        findings.append(DriftFinding(DriftType.ADDED_ENTITY, severity, f"New {kind} appeared", f"Entity {entity.get('name', key)} was not present in the previous baseline.", key))
 
     for key in sorted(previous_entities.keys() - current_entities.keys()):
         entity = previous_entities[key]
-        findings.append(
-            DriftFinding(
-                DriftType.REMOVED_ENTITY,
-                "low",
-                f"{entity.get('kind', 'entity').title()} removed",
-                f"Entity {entity.get('name', key)} is no longer present.",
-                key,
-            )
-        )
+        findings.append(DriftFinding(DriftType.REMOVED_ENTITY, "low", f"{entity.get('kind', 'entity').title()} removed", f"Entity {entity.get('name', key)} is no longer present.", key))
 
     for key in sorted(current_entities.keys() & previous_entities.keys()):
         before = previous_entities[key]
         after = current_entities[key]
         if before != after:
             kind = str(after.get("kind", "unknown"))
-            severity = "high" if kind in SENSITIVE_KINDS else "medium"
-            findings.append(
-                DriftFinding(
-                    DriftType.CHANGED_ENTITY,
-                    severity,
-                    f"{kind.title()} changed",
-                    f"Entity {after.get('name', key)} changed since the previous baseline.",
-                    key,
-                )
-            )
+            severity = "high" if kind in sensitive_kinds else "medium"
+            findings.append(DriftFinding(DriftType.CHANGED_ENTITY, severity, f"{kind.title()} changed", f"Entity {after.get('name', key)} changed since the previous baseline.", key))
 
     for key in sorted(current_relationships.keys() - previous_relationships.keys()):
         relationship = current_relationships[key]
         relation = str(relationship.get("kind", "unknown"))
         target = current_entities.get(str(relationship.get("target")), {})
-        target_kind = str(target.get("kind", "unknown"))
         target_name = str(target.get("name", relationship.get("target", "unknown")))
-        severity = _relationship_severity(relation, target)
-        findings.append(
-            DriftFinding(
-                DriftType.ADDED_RELATIONSHIP,
-                severity,
-                "New security relationship appeared",
-                f"Relationship {relation} connects {relationship.get('source')} to {target_name} ({target_kind}).",
-                key,
-            )
-        )
+        target_entity = _entity_from_snapshot(target, target_name, relationship.get("target"))
+        severity, sensitivity = relationship_severity(relation, target_entity)
+        reason = f"; sensitivity={sensitivity.auditable_reason}" if sensitivity.auditable_reason else ""
+        target_kind = str(target.get("kind", "unknown"))
+        findings.append(DriftFinding(DriftType.ADDED_RELATIONSHIP, severity.value, "New security relationship appeared", f"Relationship {relation} connects {relationship.get('source')} to {target_name} ({target_kind}){reason}.", key))
 
     for key in sorted(previous_relationships.keys() - current_relationships.keys()):
         relationship = previous_relationships[key]
-        findings.append(
-            DriftFinding(
-                DriftType.REMOVED_RELATIONSHIP,
-                "low",
-                "Security relationship removed",
-                f"Relationship {relationship.get('kind', 'unknown')} no longer connects {relationship.get('source')} to {relationship.get('target')}.",
-                key,
-            )
-        )
+        findings.append(DriftFinding(DriftType.REMOVED_RELATIONSHIP, "low", "Security relationship removed", f"Relationship {relationship.get('kind', 'unknown')} no longer connects {relationship.get('source')} to {relationship.get('target')}.", key))
 
     return tuple(findings)
 
@@ -122,26 +82,14 @@ def summarize_drift(findings: Iterable[DriftFinding]) -> dict[str, object]:
     return {"total": len(findings), "counts": counts}
 
 
-def _relationship_severity(relation: str, target: dict[str, object]) -> str:
-    target_kind = str(target.get("kind", "unknown"))
-    searchable = " ".join(
-        (
-            str(target.get("name", "")),
-            *(f"{key}={value}" for key, value in dict(target.get("properties", {})).items()),
-        )
-    ).lower()
-    is_sensitive_target = target_kind in SENSITIVE_KINDS
-    is_critical_target = target_kind in {"database", "deployment"} and any(
-        token in searchable for token in ("production", "prod", "root", "admin", "secret", "payment")
-    )
+def _entity_from_snapshot(target: dict[str, object], name: str, fallback_id: object):
+    from .domain import Entity, EntityKind
 
-    if is_critical_target and relation in HIGH_IMPACT_RELATIONS:
-        return "critical"
-    if is_sensitive_target and relation in HIGH_IMPACT_RELATIONS:
-        return "high"
-    if relation in HIGH_IMPACT_RELATIONS:
-        return "high"
-    return "medium"
+    try:
+        kind = EntityKind(str(target.get("kind", "unknown")))
+    except ValueError:
+        return None
+    return Entity(kind, name, id=str(target.get("id", fallback_id)), properties=dict(target.get("properties", {})))
 
 
 def _relationship_key(item: dict[str, object]) -> str:
