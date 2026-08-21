@@ -11,6 +11,7 @@ pub mod correlation;
 pub mod delegation;
 pub mod drift;
 pub mod enforcement;
+pub mod gateway;
 pub mod graph_backend;
 pub mod monitoring;
 pub mod provider_adapters;
@@ -24,9 +25,10 @@ pub use adapters::{AuthorizationAdapter, AZURE_RBAC, AWS_IAM, GCP_IAM, KUBERNETE
 pub use attestation::Attestation;
 pub use authorization::{AuthorizationModel, Effect, Permission};
 pub use backend::{GraphBackend, JsonBackend};
-pub use correlation::{BehaviorFinding, correlate_behavior, correlate_findings, correlated_security_paths, CorrelatedFinding, SecurityPath};
+pub use correlation::{BehaviorFinding, correlate_behavior, correlate_findings, correlated_security_paths, BehaviorFinding as RuntimeBehaviorFinding, CorrelatedFinding, SecurityPath};
 pub use delegation::{delegation_findings, effective_authority, AuthorityFinding, AuthorityPath};
 pub use enforcement::{Decision, PolicyDecision, PolicyRule};
+pub use gateway::{AuditEvent, EnforcementDecision, EnforcementGateway, ToolRequest};
 pub use graph_backend::{CypherExporter, CypherStatement, GraphTransport, MemgraphTransport, Neo4jTransport};
 pub use monitoring::{MonitoringReport, RuntimeSession};
 pub use provider_adapters::{parse_aws_iam, parse_azure_rbac, parse_gcp_iam, parse_kubernetes_rbac, parse_mcp_auth, parse_oauth_scopes};
@@ -64,6 +66,7 @@ impl Engine {
     pub fn correlated_security_paths(&self, principal: &str, max_hops: usize, max_depth: usize) -> Vec<SecurityPath> { correlated_security_paths(&self.graph, principal, max_hops, max_depth) }
     pub fn correlated_findings(&self, principal: &str, max_hops: usize, max_depth: usize) -> Vec<CorrelatedFinding> { correlate_findings(&self.graph, principal, max_hops, max_depth) }
     pub fn correlate_behavior(&self, event: &RuntimeEvent, max_hops: usize, max_depth: usize) -> Vec<BehaviorFinding> { correlate_behavior(&self.graph, event, max_hops, max_depth) }
+    pub fn enforce_request(&self, request: &ToolRequest, rules: &[PolicyRule]) -> EnforcementDecision { EnforcementGateway.evaluate(&EnforcementGateway, self, request, rules) }
 }
 
 impl Engine {
