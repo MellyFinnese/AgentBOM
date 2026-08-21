@@ -20,6 +20,10 @@ def enforce_request(graph: Any, request: dict[str, Any], rules: list[dict[str, A
     native = build_native_graph(graph)
     return json.loads(native.enforce_request_json(json.dumps(request, sort_keys=True), json.dumps(rules, sort_keys=True)))
 
+def inspect_mcp_call(graph: Any, call: dict[str, Any], action: str, resource: str, rules: list[dict[str, Any]]) -> dict[str, Any]:
+    native = build_native_graph(graph)
+    return json.loads(native.inspect_mcp_call_json(json.dumps(call, sort_keys=True), action, resource, json.dumps(rules, sort_keys=True)))
+
 def export_cypher(graph: Any) -> list[dict[str, Any]]:
     return json.loads(build_native_graph(graph).cypher_json())
 
