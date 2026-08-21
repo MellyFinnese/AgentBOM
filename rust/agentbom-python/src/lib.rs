@@ -37,6 +37,11 @@ impl NativeGraph {
         let findings = events.into_iter().filter_map(|event| monitor.observe(event)).collect::<Vec<_>>();
         serde_json::to_string(&findings).map_err(pyo3::exceptions::PyValueError::new_err)
     }
+    fn correlate_behavior_json(&self, events_json: String, max_hops: usize, max_depth: usize) -> PyResult<String> {
+        let events: Vec<RuntimeEvent> = serde_json::from_str(&events_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let findings = events.iter().flat_map(|event| self.inner.correlate_behavior(event, max_hops, max_depth)).collect::<Vec<_>>();
+        serde_json::to_string(&findings).map_err(pyo3::exceptions::PyValueError::new_err)
+    }
     fn cypher_json(&self) -> PyResult<String> { serde_json::to_string(&CypherExporter::export(&self.inner).map_err(pyo3::exceptions::PyValueError::new_err)?).map_err(pyo3::exceptions::PyValueError::new_err) }
     fn policy_decision_json(&self, action: String, resource: String, rules_json: String) -> PyResult<String> { let rules: Vec<PolicyRule> = serde_json::from_str(&rules_json).map_err(pyo3::exceptions::PyValueError::new_err)?; serde_json::to_string(&self.inner.evaluate_policy(&action, &resource, &rules)).map_err(pyo3::exceptions::PyValueError::new_err) }
     fn attestation_json(&self, timestamp: String, engine_version: String) -> PyResult<String> { serde_json::to_string(&self.inner.attest(timestamp, engine_version)).map_err(pyo3::exceptions::PyValueError::new_err) }
