@@ -1,5 +1,5 @@
 use agentbom_core::{Edge, Node};
-use agentbom_engine::Engine;
+use agentbom_engine::{Engine, PolicyRule, ToolRequest};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
@@ -33,6 +33,14 @@ pub unsafe extern "C" fn agentbom_engine_add_edge_json(engine: *mut Engine, sour
     let (Some(source), Some(kind), Some(target), Some(props)) = (read(source), read(kind), read(target), read(properties_json)) else { return 2 };
     let Ok(properties) = serde_json::from_str(&props) else { return 4 };
     engine.add_edge(Edge { source, kind, target, properties }).map(|_| 0).unwrap_or(3)
+}
+#[no_mangle]
+pub unsafe extern "C" fn agentbom_engine_enforce_request(engine: *const Engine, request_json: *const c_char, rules_json: *const c_char) -> *mut c_char {
+    let Some(engine) = engine.as_ref() else { return std::ptr::null_mut() };
+    let (Some(request_payload), Some(rules_payload)) = (read(request_json), read(rules_json)) else { return std::ptr::null_mut() };
+    let Ok(request) = serde_json::from_str::<ToolRequest>(&request_payload) else { return std::ptr::null_mut() };
+    let Ok(rules) = serde_json::from_str::<Vec<PolicyRule>>(&rules_payload) else { return std::ptr::null_mut() };
+    serde_json::to_string(&engine.enforce_request(&request, &rules)).ok().map(into_c_string).unwrap_or(std::ptr::null_mut())
 }
 #[no_mangle]
 pub unsafe extern "C" fn agentbom_engine_snapshot_hash(engine: *const Engine) -> *mut c_char { engine.as_ref().map(|e| into_c_string(e.snapshot_hash())).unwrap_or(std::ptr::null_mut()) }
