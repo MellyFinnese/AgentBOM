@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentbom.dev/schema/v1/agentbom.schema.json",
+  "title": "AgentBOM v1",
+  "type": "object",
+  "required": ["schema_version", "document", "entities", "relationships", "evidence"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "document": {
+      "type": "object",
+      "required": ["id", "created_at"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "created_at": {"type": "string", "format": "date-time"},
+        "source": {"type": "string"},
+        "engine_version": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "name"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "minLength": 1},
+          "name": {"type": "string"},
+          "properties": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "kind", "target"],
+        "properties": {
+          "source": {"type": "string"},
+          "kind": {"type": "string"},
+          "target": {"type": "string"},
+          "properties": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "source", "message"],
+        "properties": {
+          "id": {"type": "string"},
+          "source": {"type": "string"},
+          "message": {"type": "string"},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "findings": {"type": "array"},
+    "attack_paths": {"type": "array"},
+    "attestation": {"type": "object"}
+  },
+  "additionalProperties": false
+}
