@@ -1,0 +1,28 @@
+name: AgentBOM security scan
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  agentbom:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install AgentBOM
+        run: pip install .
+      - name: Validate AgentBOM schema fixture
+        run: agentbom validate examples/spec/go-producer/agentbom.json
+      - name: Emit SARIF
+        run: agentbom sarif . --output agentbom.sarif
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: agentbom.sarif
