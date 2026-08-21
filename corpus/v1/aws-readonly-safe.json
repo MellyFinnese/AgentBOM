@@ -1,0 +1,9 @@
+{
+  "case_id": "aws-readonly-safe",
+  "provider": "aws",
+  "class": "safe",
+  "description": "Agent receives a least-privilege read-only grant scoped to a non-production object.",
+  "input": {"principal": "agent-readonly", "action": "s3:GetObject", "resource": "arn:aws:s3:::docs-public/*"},
+  "expected_findings": [],
+  "expected_behavior": "allow"
+}
