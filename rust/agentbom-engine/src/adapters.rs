@@ -33,6 +33,7 @@ impl AuthorizationAdapter for JsonPolicyAdapter {
                 _ => Effect::Allow,
             },
             conditions: grant.conditions.unwrap_or_else(|| serde_json::json!({})),
+            provider: Some(self.provider.into()),
         }).collect();
         Ok(AuthorizationModel { permissions })
     }
