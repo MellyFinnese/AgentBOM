@@ -1,0 +1,9 @@
+{
+  "case_id": "gcp-owner-wildcard",
+  "provider": "gcp",
+  "class": "vulnerable",
+  "description": "Agent receives broad project-owner authority that permits unrestricted administrative actions.",
+  "input": {"principal": "agent-sa", "role": "roles/owner", "resource": "projects/production"},
+  "expected_findings": ["AGENTBOM-AUTH-WILDCARD"],
+  "expected_behavior": "deny-or-review"
+}
