@@ -72,12 +72,16 @@ Permission
 Resource
 ```
 
-The Rust engine can resolve effective authority across bounded delegation hops and produce findings when authority is inherited through delegation.
+The Rust engine resolves effective authority across bounded delegation hops and can correlate that inherited authority with reachable security resources.
 
 ```bash
 agentbom authority ./mcp.json agent-a
 agentbom authority ./mcp.json agent-a --findings
+agentbom attack-paths ./mcp.json agent-a
+agentbom attack-paths ./mcp.json agent-a --findings
 ```
+
+A correlated finding can now preserve the complete evidence chain rather than reporting the permission and resource independently.
 
 ## Generating a v1 document
 
