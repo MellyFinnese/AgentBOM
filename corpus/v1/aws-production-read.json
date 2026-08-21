@@ -1,0 +1,9 @@
+{
+  "case_id": "aws-production-read",
+  "provider": "aws",
+  "class": "vulnerable",
+  "description": "Agent gains read access to a production data resource.",
+  "input": {"principal": "agent-role", "action": "s3:GetObject", "resource": "arn:aws:s3:::prod-data/*"},
+  "expected_findings": ["AGENTBOM-AUTH-SENSITIVE-READ"],
+  "expected_behavior": "deny-or-review"
+}
