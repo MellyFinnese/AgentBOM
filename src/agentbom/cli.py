@@ -11,6 +11,7 @@ from .discovery_mcp import MCPConfigSource, discover_mcp_config
 from .domain import EntityKind
 from .graph import InMemoryGraph
 from .path_analysis import BoundedPathAnalyzer
+from .policy import analyze_policies
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--json", action="store_true", dest="as_json", help="Emit normalized JSON")
     scan.add_argument("--paths", action="store_true", help="Show reachable high-impact attack paths")
     scan.add_argument("--auth", action="store_true", help="Show discovered identity and authorization chains")
+    scan.add_argument("--policy", action="store_true", help="Run deterministic security policy analysis")
     scan.add_argument("--max-depth", type=int, default=8)
     return parser
 
@@ -98,14 +100,15 @@ def _path_records(graph: InMemoryGraph, max_depth: int) -> list[dict[str, object
 def main() -> int:
     args = build_parser().parse_args()
     if args.command == "info":
-        print("AgentBOM: discovery -> normalized graph -> authorization -> attack paths")
+        print("AgentBOM: discovery -> normalized graph -> authorization -> policy -> attack paths")
         return 0
     if args.command == "scan":
         graph, observations = _scan(args.target)
         authorization = _authorization_chains(graph) if args.auth else None
-        paths = _path_records(graph, args.max_depth) if args.paths else None
+        paths = _path_records(graph, args.max_depth) if args.paths or args.policy else None
+        findings = analyze_policies(graph, max_depth=args.max_depth) if args.policy else None
         if args.as_json:
-            payload = {
+            payload: dict[str, object] = {
                 "entities": [
                     {
                         "id": entity.id,
@@ -128,8 +131,20 @@ def main() -> int:
             }
             if authorization is not None:
                 payload["authorization"] = authorization
-            if paths is not None:
-                payload["attack_paths"] = paths
+            if args.paths:
+                payload["attack_paths"] = paths or []
+            if findings is not None:
+                payload["policy_findings"] = [
+                    {
+                        "rule_id": finding.rule_id,
+                        "severity": finding.severity.value,
+                        "title": finding.title,
+                        "description": finding.description,
+                        "entity_ids": list(finding.entity_ids),
+                        "evidence": list(finding.evidence),
+                    }
+                    for finding in findings
+                ]
             print(json.dumps(payload, indent=2, default=str))
         else:
             print(f"Entities: {len(graph.entities)}")
@@ -143,9 +158,17 @@ def main() -> int:
                         f"{chain['agent']} -> {chain['identity']} -> {chain['credential']} -> "
                         f"{chain['permission']} -> {chain['resource']}"
                     )
-            if paths is not None:
-                for path in paths:
+            if args.paths:
+                for path in paths or []:
                     print(f"Attack path: {' -> '.join(path['entities'])}")
+            if findings is not None:
+                print(f"Policy findings: {len(findings)}")
+                for finding in findings:
+                    evidence = "; ".join(finding.evidence)
+                    print(f"[{finding.severity.value.upper()}] {finding.rule_id}: {finding.title}")
+                    print(f"  {finding.description}")
+                    if evidence:
+                        print(f"  Evidence: {evidence}")
         return 0
 
     build_parser().print_help()
