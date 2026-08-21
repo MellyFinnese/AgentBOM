@@ -19,6 +19,7 @@ from .native_bridge_extended import (
     enforce_request,
     enforcement_decision,
     export_cypher,
+    inspect_mcp_call,
     parse_authorization,
     runtime_monitor_json,
     sign_attestation,
@@ -71,6 +72,14 @@ def build_parser() -> argparse.ArgumentParser:
     enforce.add_argument("--rules", type=Path, required=True)
     enforce.add_argument("--audit", action="store_true", help="Include an audit event in the output")
     enforce.add_argument("--fail-on-deny", action="store_true", help="Return non-zero when the request is denied or needs approval")
+
+    mcp = sub.add_parser("mcp-gateway", help="Inspect an MCP tool call through the native enforcement gateway without executing it")
+    mcp.add_argument("target", type=Path)
+    mcp.add_argument("request", type=Path, help="MCP tool-call envelope JSON")
+    mcp.add_argument("--action", required=True, help="Normalized action for the policy engine")
+    mcp.add_argument("--resource", required=True, help="Normalized resource for the policy engine")
+    mcp.add_argument("--rules", type=Path, required=True)
+    mcp.add_argument("--fail-on-deny", action="store_true", help="Return non-zero unless the gateway allows forwarding")
 
     cy = sub.add_parser("cypher", help="Export a discovered graph as parameterized Cypher statements")
     cy.add_argument("target", type=Path)
@@ -136,7 +145,7 @@ def main() -> int:
         return 0
     if args.command == "behavior-check":
         graph, _ = _scan(args.target)
-        findings = correlate_behavior(graph, _load_events(args.events), args.max_hops, args.max_depth)
+        findings = json.loads(json.dumps(__import__("agentbom.native_bridge_extended", fromlist=["correlate_behavior"]).correlate_behavior(graph, _load_events(args.events), args.max_hops, args.max_depth)))
         payload = {"analysis_engine": "rust", "findings": findings, "high_or_critical": sum(str(f.get("severity", "")).lower() in {"high", "critical"} for f in findings)}
         print(json.dumps(payload if args.as_json else findings, indent=2, default=str))
         return _risk_exit(findings) if args.fail_on_risk else 0
@@ -160,6 +169,15 @@ def main() -> int:
             }
         print(json.dumps(payload, indent=2, default=str))
         if args.fail_on_deny and decision["decision"] in {"Deny", "RequireApproval"}:
+            return 1
+        return 0
+    if args.command == "mcp-gateway":
+        graph, _ = _scan(args.target)
+        request = json.loads(args.request.read_text(encoding="utf-8"))
+        rules = json.loads(args.rules.read_text(encoding="utf-8"))
+        result = inspect_mcp_call(graph, request, args.action, args.resource, rules)
+        print(json.dumps({"analysis_engine": "rust", **result}, indent=2, default=str))
+        if args.fail_on_deny and not result.get("forward", False):
             return 1
         return 0
     if args.command == "cypher":
@@ -214,8 +232,8 @@ def main() -> int:
             runtime_result = discover_local_runtime(include_connections=args.runtime_network)
             payload["runtime"] = {"entities": [{"id": e.id, "kind": e.kind.value, "name": e.name, "properties": dict(e.properties)} for e in runtime_result.entities], "observations": [o.message for o in runtime_result.observations]}
         if args.behavior_events:
-            behavior_findings = correlate_behavior(graph, _load_events(args.behavior_events), 8, args.max_depth)
-            payload["behavior_findings"] = behavior_findings
+            from .native_bridge_extended import correlate_behavior
+            payload["behavior_findings"] = correlate_behavior(graph, _load_events(args.behavior_events), 8, args.max_depth)
         if args.save_baseline:
             snapshot = snapshot_graph(graph)
             save_snapshot(snapshot, args.save_baseline)
