@@ -1,5 +1,5 @@
 use agentbom_core::{Edge, Node};
-use agentbom_engine::{Engine, PolicyRule, ToolRequest};
+use agentbom_engine::{Engine, McpToolCall, PolicyRule, ToolRequest};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
@@ -41,6 +41,14 @@ pub unsafe extern "C" fn agentbom_engine_enforce_request(engine: *const Engine, 
     let Ok(request) = serde_json::from_str::<ToolRequest>(&request_payload) else { return std::ptr::null_mut() };
     let Ok(rules) = serde_json::from_str::<Vec<PolicyRule>>(&rules_payload) else { return std::ptr::null_mut() };
     serde_json::to_string(&engine.enforce_request(&request, &rules)).ok().map(into_c_string).unwrap_or(std::ptr::null_mut())
+}
+#[no_mangle]
+pub unsafe extern "C" fn agentbom_engine_inspect_mcp_call(engine: *const Engine, call_json: *const c_char, action: *const c_char, resource: *const c_char, rules_json: *const c_char) -> *mut c_char {
+    let Some(engine) = engine.as_ref() else { return std::ptr::null_mut() };
+    let (Some(call_payload), Some(action), Some(resource), Some(rules_payload)) = (read(call_json), read(action), read(resource), read(rules_json)) else { return std::ptr::null_mut() };
+    let Ok(call) = serde_json::from_str::<McpToolCall>(&call_payload) else { return std::ptr::null_mut() };
+    let Ok(rules) = serde_json::from_str::<Vec<PolicyRule>>(&rules_payload) else { return std::ptr::null_mut() };
+    serde_json::to_string(&engine.inspect_mcp_call(&call, &action, &resource, &rules)).ok().map(into_c_string).unwrap_or(std::ptr::null_mut())
 }
 #[no_mangle]
 pub unsafe extern "C" fn agentbom_engine_snapshot_hash(engine: *const Engine) -> *mut c_char { engine.as_ref().map(|e| into_c_string(e.snapshot_hash())).unwrap_or(std::ptr::null_mut()) }
