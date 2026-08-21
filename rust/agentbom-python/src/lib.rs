@@ -1,5 +1,5 @@
 use agentbom_core::{Edge, Node};
-use agentbom_engine::{CypherExporter, Engine, PolicyRule, RuntimeEvent};
+use agentbom_engine::{AttestationSigner, CypherExporter, Engine, PolicyRule, RuntimeEvent};
 use pyo3::prelude::*;
 
 #[pyclass]
