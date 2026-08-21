@@ -1,0 +1,9 @@
+{
+  "case_id": "aws-production-write",
+  "provider": "aws",
+  "class": "vulnerable",
+  "description": "Agent can mutate a production DynamoDB resource through a direct write grant.",
+  "input": {"principal": "agent-role", "action": "dynamodb:PutItem", "resource": "arn:aws:dynamodb:*:*:table/production"},
+  "expected_findings": ["AGENTBOM-AUTH-PRODUCTION-WRITE"],
+  "expected_behavior": "deny-or-review"
+}
