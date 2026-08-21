@@ -1,0 +1,25 @@
+name: Rust Core
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Format
+        working-directory: rust
+        run: cargo fmt --all -- --check
+      - name: Test workspace
+        working-directory: rust
+        run: cargo test --workspace
+      - name: Build C ABI
+        working-directory: rust
+        run: cargo build -p agentbom-ffi --release
