@@ -13,22 +13,15 @@ pub struct Permission {
     pub effect: Effect,
     #[serde(default)]
     pub conditions: serde_json::Value,
-    /// Provider which produced the normalized permission (aws, gcp, azure, k8s, oauth, mcp).
     #[serde(default)]
     pub provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthorizationDecision {
-    Allow,
-    Deny,
-    Indeterminate,
-}
+pub enum AuthorizationDecision { Allow, Deny, Indeterminate }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AuthorizationModel {
-    pub permissions: Vec<Permission>,
-}
+pub struct AuthorizationModel { pub permissions: Vec<Permission> }
 
 impl AuthorizationModel {
     pub fn add(&mut self, permission: Permission) { self.permissions.push(permission); }
@@ -41,9 +34,8 @@ impl AuthorizationModel {
         }).collect()
     }
 
-    /// Evaluate without a condition context. Condition-bearing allows never grant authority
-    /// unless their conditions are empty. This prevents a normalized conditional allow from
-    /// becoming an unconditional allow.
+    /// Evaluate without a condition context. Condition-bearing permissions never establish
+    /// authority because their applicability is unresolved.
     pub fn is_allowed(&self, principal: &str, action: &str, resource: &str) -> bool {
         matches!(self.evaluate(principal, action, resource, &HashMap::new()), AuthorizationDecision::Allow)
     }
@@ -74,8 +66,8 @@ impl AuthorizationModel {
             }
         }
 
-        if allowed { AuthorizationDecision::Allow }
-        else if saw_indeterminate { AuthorizationDecision::Indeterminate }
+        if saw_indeterminate { AuthorizationDecision::Indeterminate }
+        else if allowed { AuthorizationDecision::Allow }
         else { AuthorizationDecision::Deny }
     }
 }
@@ -119,9 +111,6 @@ fn condition_state(conditions: &serde_json::Value, context: &HashMap<String, Str
 
 fn principal_matches(pattern: &str, value: &str) -> bool { matches_pattern(pattern, value, true) }
 
-/// Supports `*` and `?` globs for action/principal/resource patterns. This deliberately
-/// avoids provider-specific regex semantics while supporting hierarchical ARN/path-style
-/// resource scopes such as `arn:aws:s3:::bucket/*` and `/prod/*`.
 fn matches_pattern(pattern: &str, value: &str, case_insensitive: bool) -> bool {
     if pattern == "*" { return true; }
     glob_match(pattern, value, case_insensitive)
@@ -175,6 +164,7 @@ mod tests {
     #[test]
     fn conditional_allow_fails_closed_without_context() {
         let model = AuthorizationModel { permissions: vec![permission(Effect::Allow, "read", "prod/*", serde_json::json!({"StringEquals":{"env":"prod"}}))] };
+        assert_eq!(model.evaluate("agent", "read", "prod/db", &HashMap::new()), AuthorizationDecision::Indeterminate);
         assert!(!model.is_allowed("agent", "read", "prod/db"));
     }
 
@@ -195,8 +185,12 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_condition_operator_is_indeterminate_and_denies() {
-        let model = AuthorizationModel { permissions: vec![permission(Effect::Allow, "read", "*", serde_json::json!({"IpAddress":{"sourceIp":"10.0.0.1"}}))] };
-        assert!(!model.is_allowed("agent", "read", "anything"));
+    fn conditional_deny_prevents_unconditional_allow_when_context_is_unknown() {
+        let model = AuthorizationModel { permissions: vec![
+            permission(Effect::Allow, "write", "prod/*", serde_json::json!({})),
+            permission(Effect::Deny, "write", "prod/*", serde_json::json!({"StringEquals":{"env":"restricted"}})),
+        ]};
+        assert_eq!(model.evaluate("agent", "write", "prod/db", &HashMap::new()), AuthorizationDecision::Indeterminate);
+        assert!(!model.is_allowed("agent", "write", "prod/db"));
     }
 }
