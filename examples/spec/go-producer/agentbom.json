@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "document": {
+    "id": "go-fixture-001",
+    "created_at": "2026-08-21T00:00:00Z",
+    "source": "example-go-producer"
+  },
+  "entities": [
+    {"id": "agent:writer", "kind": "agent", "name": "writer-agent", "properties": {"language": "go"}},
+    {"id": "tool:filesystem", "kind": "tool", "name": "filesystem", "properties": {"protocol": "mcp"}},
+    {"id": "resource:workspace", "kind": "resource", "name": "workspace", "properties": {"sensitivity": "internal"}}
+  ],
+  "relationships": [
+    {"source": "agent:writer", "kind": "uses", "target": "tool:filesystem"},
+    {"source": "tool:filesystem", "kind": "can_access", "target": "resource:workspace"}
+  ],
+  "evidence": [
+    {"id": "evidence:1", "source": "go-fixture", "message": "Example third-party producer document", "confidence": 1.0}
+  ]
+}
