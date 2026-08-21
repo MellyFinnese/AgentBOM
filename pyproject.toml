@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentbom"
+version = "0.1.0"
+description = "AI agent security and attack-surface intelligence."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "MellyFinnese"}]
+dependencies = []
+
+[project.scripts]
+agentbom = "agentbom.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentbom"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
