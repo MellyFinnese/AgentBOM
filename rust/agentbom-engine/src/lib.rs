@@ -2,6 +2,7 @@ use agentbom_core::{Edge, GraphDiff, Node, SecurityGraph};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub mod adapters;
 pub mod analysis;
 pub mod attestation;
 pub mod authorization;
@@ -12,8 +13,9 @@ pub mod query;
 
 use analysis::{analyze_policy, attack_paths, blast_radius, BlastRadius, PathResult, PolicyFinding};
 use drift::{analyze_drift, DriftFinding};
+pub use adapters::{AuthorizationAdapter, AZURE_RBAC, AWS_IAM, GCP_IAM, KUBERNETES_RBAC, MCP_AUTH, OAUTH_SCOPES};
 pub use attestation::Attestation;
-pub use authorization::{AuthorizationModel, Permission};
+pub use authorization::{AuthorizationModel, Effect, Permission};
 pub use backend::{GraphBackend, JsonBackend};
 pub use enforcement::{Decision, PolicyDecision, PolicyRule};
 pub use query::GraphQueryResult;
@@ -40,7 +42,11 @@ impl Engine {
     pub fn blast_radius(&self, max_depth: usize) -> Vec<BlastRadius> { blast_radius(&self.graph, max_depth) }
     pub fn drift_findings(&self, baseline: &Engine) -> Vec<DriftFinding> { analyze_drift(&self.graph, &baseline.graph) }
     pub fn paths_to_kind(&self, start: &str, target_kind: &str, max_depth: usize) -> GraphQueryResult { self.query_paths_to_kind(start, target_kind, max_depth) }
+    pub fn agents_reaching_kind(&self, target_kind: &str, max_depth: usize) -> Vec<GraphQueryResult> {
+        self.graph.nodes.values().filter(|n| n.kind == "agent").map(|n| self.query_paths_to_kind(&n.id, target_kind, max_depth)).filter(|r| !r.paths.is_empty()).collect()
+    }
     pub fn evaluate_policy(&self, action: &str, resource: &str, rules: &[PolicyRule]) -> PolicyDecision { enforcement::evaluate(self, action, resource, rules) }
+    pub fn parse_authorization<A: AuthorizationAdapter>(&self, adapter: A, payload: &str) -> Result<AuthorizationModel, String> { adapter.parse_json(payload) }
 }
 
 impl Engine {
@@ -49,10 +55,6 @@ impl Engine {
             path.last().and_then(|id| self.graph.nodes.get(id)).map(|node| node.kind.as_str() == target_kind).unwrap_or(false)
         }).collect();
         GraphQueryResult { start: start.into(), target_kind: Some(target_kind.into()), paths }
-    }
-
-    pub fn agents_reaching_kind(&self, target_kind: &str, max_depth: usize) -> Vec<GraphQueryResult> {
-        self.graph.nodes.values().filter(|n| n.kind == "agent").map(|n| self.query_paths_to_kind(&n.id, target_kind, max_depth)).filter(|r| !r.paths.is_empty()).collect()
     }
 }
 
@@ -86,6 +88,13 @@ mod tests {
         let engine = sample();
         let restored = Engine::import_json(&engine.export_json().unwrap()).unwrap();
         assert_eq!(engine.snapshot_hash(), restored.snapshot_hash());
+    }
+
+    #[test]
+    fn authorization_adapters_normalize() {
+        let payload = r#"[{"principal":"agent","action":"read","resource":"prod-db","effect":"allow"}]"#;
+        let model = AWS_IAM.parse_json(payload).unwrap();
+        assert!(model.is_allowed("agent", "read", "prod-db"));
     }
 
     #[test]
