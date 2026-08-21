@@ -22,6 +22,7 @@ from .native_bridge_extended import (
     inspect_mcp_call,
     inspect_mcp_call_with_definitions,
     parse_authorization,
+    parse_mcp_tools,
     runtime_monitor_json,
     sign_attestation,
 )
@@ -55,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
     auth.add_argument("provider", choices=["aws-iam", "gcp-iam", "azure-rbac", "kubernetes-rbac", "oauth", "mcp"])
     auth.add_argument("policy", type=Path)
 
+    mcp_discover = sub.add_parser("mcp-discover", help="Parse a captured MCP tools/list response into a normalized AgentBOM tool registry")
+    mcp_discover.add_argument("response", type=Path, help="MCP tools/list response JSON")
+    mcp_discover.add_argument("--output", type=Path, help="Write the normalized registry JSON to a file")
+
     mon = sub.add_parser("monitor", help="Analyze runtime events with the Rust monitoring engine")
     mon.add_argument("events", type=Path)
     mon.add_argument("--declared", type=Path, required=True)
@@ -77,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     mcp = sub.add_parser("mcp-gateway", help="Inspect an MCP tool call through the native enforcement gateway without executing it")
     mcp.add_argument("target", type=Path)
     mcp.add_argument("request", type=Path, help="MCP tool-call envelope JSON")
-    mcp.add_argument("--tool-definitions", type=Path, help="MCP tools/list-style JSON array used to resolve action/resource context")
+    mcp.add_argument("--tool-definitions", type=Path, help="Normalized MCP tool-definition JSON or a tools/list response")
     mcp.add_argument("--action", help="Explicit normalized action override")
     mcp.add_argument("--resource", help="Explicit normalized resource override")
     mcp.add_argument("--rules", type=Path, required=True)
@@ -133,6 +138,17 @@ def _risk_exit(findings: list[dict[str, object]]) -> int:
     return 1 if any(str(item.get("severity", "")).lower() in {"high", "critical"} for item in findings) else 0
 
 
+def _load_tool_definitions(path: Path) -> list[dict[str, object]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("tools"), list):
+        return payload["tools"]
+    if isinstance(payload, dict) and isinstance(payload.get("result"), dict) and isinstance(payload["result"].get("tools"), list):
+        return payload["result"]["tools"]
+    raise ValueError("MCP tool definitions must be an array or a tools/list response")
+
+
 def main() -> int:
     args = build_parser().parse_args()
     if args.command == "info":
@@ -140,6 +156,14 @@ def main() -> int:
         return 0
     if args.command == "auth-parse":
         print(json.dumps(parse_authorization(args.provider, args.policy.read_text(encoding="utf-8")), indent=2))
+        return 0
+    if args.command == "mcp-discover":
+        normalized = parse_mcp_tools(args.response.read_text(encoding="utf-8"))
+        payload = json.dumps(normalized, indent=2, sort_keys=True)
+        if args.output:
+            args.output.write_text(payload + "\n", encoding="utf-8")
+        else:
+            print(payload)
         return 0
     if args.command == "monitor":
         declared = json.loads(args.declared.read_text(encoding="utf-8"))
@@ -159,17 +183,7 @@ def main() -> int:
         decision = enforce_request(graph, request, rules)
         payload: dict[str, object] = {"analysis_engine": "rust", "decision": decision}
         if args.audit:
-            payload["audit"] = {
-                "audit_id": decision["audit_id"],
-                "request_id": decision["request_id"],
-                "agent_id": request.get("agent_id"),
-                "tool": request.get("tool"),
-                "action": request.get("action"),
-                "resource": request.get("resource"),
-                "decision": decision["decision"],
-                "matched_rule": decision.get("matched_rule"),
-                "reason": decision["reason"],
-            }
+            payload["audit"] = {"audit_id": decision["audit_id"], "request_id": decision["request_id"], "agent_id": request.get("agent_id"), "tool": request.get("tool"), "action": request.get("action"), "resource": request.get("resource"), "decision": decision["decision"], "matched_rule": decision.get("matched_rule"), "reason": decision["reason"]}
         print(json.dumps(payload, indent=2, default=str))
         if args.fail_on_deny and decision["decision"] in {"Deny", "RequireApproval"}:
             return 1
@@ -179,9 +193,7 @@ def main() -> int:
         request = json.loads(args.request.read_text(encoding="utf-8"))
         rules = json.loads(args.rules.read_text(encoding="utf-8"))
         if args.tool_definitions:
-            definitions = json.loads(args.tool_definitions.read_text(encoding="utf-8"))
-            if not isinstance(definitions, list):
-                raise ValueError("tool definitions file must contain a JSON array")
+            definitions = _load_tool_definitions(args.tool_definitions)
             result = inspect_mcp_call_with_definitions(graph, request, definitions, rules, args.action, args.resource)
         else:
             if not args.action or not args.resource:
