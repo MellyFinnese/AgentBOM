@@ -6,7 +6,7 @@ AgentBOM models autonomous AI systems as relationships between agents, models, t
 
 ## Rust-native architecture
 
-AgentBOM is now **Rust-first**. The security engine is implemented once in native Rust and exposed through stable bindings:
+AgentBOM is **Rust-first**. The security engine is implemented once in native Rust and exposed through stable bindings:
 
 ```text
                            AgentBOM
@@ -15,13 +15,13 @@ AgentBOM is now **Rust-first**. The security engine is implemented once in nativ
                               |
              +----------------+----------------+
              |                |                |
-          Python             C ABI            WASM* 
+          Python             C ABI            WASM
           / CLI              / FFI
              |                |
           Tooling        C/C++/Go/etc.
 ```
 
-`agentbom-core` contains graph primitives. `agentbom-engine` is the stable native API. `agentbom-ffi` publishes the C ABI, and `agentbom-python` exposes the same engine through PyO3. Security-critical graph operations are not reimplemented in Python.
+`agentbom-core` contains graph primitives. `agentbom-engine` is the stable native API and owns graph traversal, policy, attack paths, blast radius, and temporal drift. `agentbom-ffi` publishes the C ABI, `agentbom-python` exposes the same engine through PyO3, and `agentbom-wasm` exposes the analysis API to WebAssembly. Security-critical analysis is not maintained as a second Python implementation.
 
 The Rust workspace is tested and built independently by CI, including the C FFI artifact.
 
@@ -43,9 +43,9 @@ agentbom scan ./mcp.json --json --auth --paths --policy --blast-radius --runtime
 
 Discovery normalizes declared agents, MCP servers, tools, credentials, capabilities, identities, permission grants, and resource scope into the AgentBOM graph.
 
-The deterministic policy engine detects wildcard grants, production mutation authority, configuration-referenced credentials, dangerous tool capabilities, and reachable high-impact resources.
+The native Rust engine evaluates wildcard grants, production mutation authority, configuration-referenced credentials, dangerous tool capabilities, reachable high-impact resources, blast radius, and graph drift.
 
-The blast-radius engine estimates what an agent can ultimately affect. Runtime discovery compares observed local state with declared authority. Temporal snapshots then compare the normalized security graph across scans, highlighting newly introduced entities, permissions, credentials, tools, and relationships.
+Runtime discovery compares observed local state with declared authority. Temporal snapshots compare the normalized security graph across scans and highlight newly introduced entities, permissions, credentials, tools, and relationships.
 
 Baselines are canonicalized and SHA-256 digested. A baseline must verify successfully before drift analysis is performed.
 
@@ -64,7 +64,7 @@ Security Graph ----> Current Graph
           Drift Findings
 ```
 
-Drift is reported as added/removed/changed entities and added/removed relationships, with elevated severity for sensitive entity kinds and high-impact authorization relationships.
+Drift is reported as added/removed entities and relationships, with elevated severity for security-sensitive additions such as credentials, identities, permissions, grants, and access paths.
 
 ## Architecture
 
@@ -92,20 +92,18 @@ Drift is reported as added/removed/changed entities and added/removed relationsh
              |                            |
              v                   +--------+--------+
         Attack Paths             |        |        |
-             |                Python     C ABI    WASM*
+             |                Python     C ABI    WASM
              v
         Blast Radius
              |
              v
        Reporting / CI
-
-* planned binding; not yet shipped
 ```
 
 ## Design principles
 
 - **Rust-first:** one authoritative native implementation for security-critical analysis.
-- **Stable bindings:** C ABI for broad interoperability and PyO3 for Python ergonomics.
+- **Stable bindings:** C ABI for broad interoperability, PyO3 for Python ergonomics, and WebAssembly for portable embedding.
 - **Domain-first:** the security model comes before integrations.
 - **Capability-aware:** capabilities and authorization are modeled explicitly.
 - **Authority-aware:** identity, credentials, permission grants, effects, conditions, and resource scope are first-class concepts.
@@ -120,4 +118,4 @@ Drift is reported as added/removed/changed entities and added/removed relationsh
 
 ## Status
 
-Early active development. The Rust-native graph engine, stable engine API, C FFI boundary, Python binding, discovery, authorization, policy, blast-radius, runtime reconciliation, and temporal drift foundations are in place. Next major layers are moving the remaining policy/blast-radius/drift algorithms fully into Rust, richer IAM/API authorization ingestion, graph backends, continuous monitoring, and signed/attested baseline workflows.
+Early active development. The Rust-native graph engine, stable engine API, C FFI, PyO3 binding, WASM binding, discovery, authorization, policy, attack-path, blast-radius, runtime reconciliation, and temporal drift foundations are in place. Next major layers are richer IAM/API authorization ingestion, graph backends, continuous monitoring, signed/attested baseline workflows, and expanded runtime connectors.
