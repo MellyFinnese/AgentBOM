@@ -24,6 +24,10 @@ def inspect_mcp_call(graph: Any, call: dict[str, Any], action: str, resource: st
     native = build_native_graph(graph)
     return json.loads(native.inspect_mcp_call_json(json.dumps(call, sort_keys=True), action, resource, json.dumps(rules, sort_keys=True)))
 
+def inspect_mcp_call_with_definitions(graph: Any, call: dict[str, Any], definitions: list[dict[str, Any]], rules: list[dict[str, Any]], action_override: str | None = None, resource_override: str | None = None) -> dict[str, Any]:
+    native = build_native_graph(graph)
+    return json.loads(native.inspect_mcp_call_with_definitions_json(json.dumps(call, sort_keys=True), json.dumps(definitions, sort_keys=True), action_override, resource_override, json.dumps(rules, sort_keys=True)))
+
 def export_cypher(graph: Any) -> list[dict[str, Any]]:
     return json.loads(build_native_graph(graph).cypher_json())
 
