@@ -1,6 +1,7 @@
 use agentbom_core::{Edge, Node};
 use agentbom_engine::{AttestationSigner, CypherExporter, Engine, McpToolCall, McpToolDefinition, PolicyRule, RuntimeEvent, ToolRequest};
 use pyo3::prelude::*;
+use std::collections::HashMap;
 
 #[pyclass]
 struct NativeGraph { inner: Engine }
@@ -22,13 +23,14 @@ impl NativeGraph {
     fn blast_radius_json(&self, max_depth: usize) -> PyResult<String> { serde_json::to_string(&self.inner.blast_radius(max_depth)).map_err(pyo3::exceptions::PyValueError::new_err) }
     fn drift_json(&self, baseline_json: String) -> PyResult<String> { let baseline = Engine::import_json(&baseline_json).map_err(pyo3::exceptions::PyValueError::new_err)?; serde_json::to_string(&self.inner.drift_findings(&baseline)).map_err(pyo3::exceptions::PyValueError::new_err) }
     fn parse_authorization_json(&self, provider: String, payload: String) -> PyResult<String> {
-        let model = match provider.as_str() {
-            "aws-iam" => agentbom_engine::parse_aws_iam(&payload), "gcp-iam" => agentbom_engine::parse_gcp_iam(&payload),
-            "azure-rbac" => agentbom_engine::parse_azure_rbac(&payload), "kubernetes-rbac" => agentbom_engine::parse_kubernetes_rbac(&payload),
-            "oauth" | "oauth-scopes" => agentbom_engine::parse_oauth_scopes(&payload), "mcp" | "mcp-auth" => agentbom_engine::parse_mcp_auth(&payload),
-            _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("unsupported authorization provider: {provider}"))),
-        }.map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let model = parse_provider(&provider, &payload)?;
         serde_json::to_string(&model).map_err(pyo3::exceptions::PyValueError::new_err)
+    }
+    fn authorization_decision_json(&self, provider: String, payload: String, principal: String, action: String, resource: String, context_json: String) -> PyResult<String> {
+        let model = parse_provider(&provider, &payload)?;
+        let context: HashMap<String, String> = serde_json::from_str(&context_json).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let decision = model.evaluate(&principal, &action, &resource, &context);
+        serde_json::to_string(&decision).map_err(pyo3::exceptions::PyValueError::new_err)
     }
     fn parse_mcp_tools_json(&self, payload: String) -> PyResult<String> {
         serde_json::to_string(&agentbom_engine::McpGateway::parse_tools_list(&payload).map_err(pyo3::exceptions::PyValueError::new_err)?)
@@ -70,6 +72,18 @@ impl NativeGraph {
     fn correlated_security_paths_json(&self, principal: String, max_hops: usize, max_depth: usize) -> PyResult<String> { serde_json::to_string(&self.inner.correlated_security_paths(&principal, max_hops, max_depth)).map_err(pyo3::exceptions::PyValueError::new_err) }
     fn correlated_findings_json(&self, principal: String, max_hops: usize, max_depth: usize) -> PyResult<String> { serde_json::to_string(&self.inner.correlated_findings(&principal, max_hops, max_depth)).map_err(pyo3::exceptions::PyValueError::new_err) }
     fn export_json(&self) -> PyResult<String> { self.inner.export_json().map_err(pyo3::exceptions::PyValueError::new_err) }
+}
+
+fn parse_provider(provider: &str, payload: &str) -> PyResult<agentbom_engine::AuthorizationModel> {
+    match provider.trim().to_lowercase().replace('_', "-").as_str() {
+        "aws-iam" => agentbom_engine::parse_aws_iam(payload),
+        "gcp-iam" => agentbom_engine::parse_gcp_iam(payload),
+        "azure-rbac" => agentbom_engine::parse_azure_rbac(payload),
+        "kubernetes-rbac" => agentbom_engine::parse_kubernetes_rbac(payload),
+        "oauth" | "oauth-scopes" => agentbom_engine::parse_oauth_scopes(payload),
+        "mcp" | "mcp-auth" => agentbom_engine::parse_mcp_auth(payload),
+        _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("unsupported authorization provider: {provider}"))),
+    }.map_err(pyo3::exceptions::PyValueError::new_err)
 }
 
 #[pymodule]
