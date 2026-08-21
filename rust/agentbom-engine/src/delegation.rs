@@ -94,8 +94,8 @@ fn shadowed_by_overlapping_deny(model: &AuthorizationModel, allow: &Permission) 
 
 fn patterns_overlap(a: &str, b: &str) -> bool {
     if a == "*" || b == "*" || a.eq_ignore_ascii_case(b) { return true; }
-    let a_prefix = a.split(['*', '?']).next().unwrap_or(a);
-    let b_prefix = b.split(['*', '?']).next().unwrap_or(b);
+    let a_prefix = a.split(|c| c == '*' || c == '?').next().unwrap_or(a);
+    let b_prefix = b.split(|c| c == '*' || c == '?').next().unwrap_or(b);
     a_prefix.starts_with(b_prefix) || b_prefix.starts_with(a_prefix)
 }
 
