@@ -2,7 +2,8 @@ use agentbom_core::{Node, SecurityGraph};
 use serde::{Deserialize, Serialize};
 
 const HIGH_IMPACT_KINDS: &[&str] = &["credential", "data_source", "database", "deployment"];
-const SENSITIVE_WORDS: &[&str] = &["prod", "production", "secret", "credential", "database", "admin"];
+const ANALYSIS_PATH_CAP: usize = 10_000;
+const SENSITIVE_WORDS: &[&str] = &["prod", "production", "secret", "credential", "payment"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PolicyFinding {
@@ -12,6 +13,10 @@ pub struct PolicyFinding {
     pub description: String,
     pub node_ids: Vec<String>,
     pub evidence: Vec<String>,
+    #[serde(default)]
+    pub likelihood: String,
+    #[serde(default)]
+    pub confidence: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -28,6 +33,8 @@ pub struct ImpactedResource {
     pub distance: usize,
     pub path_count: usize,
     pub tier: String,
+    #[serde(default)]
+    pub sensitivity_reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -36,6 +43,35 @@ pub struct BlastRadius {
     pub score: u32,
     pub tier: String,
     pub resources: Vec<ImpactedResource>,
+    #[serde(default)]
+    pub score_model: String,
+}
+
+fn finding(
+    rule_id: &str,
+    severity: &str,
+    title: &str,
+    description: String,
+    node_ids: Vec<String>,
+    evidence: Vec<String>,
+) -> PolicyFinding {
+    let confidence = if evidence.is_empty() { "low" } else { "high" };
+    let likelihood = match severity {
+        "critical" => "high",
+        "high" => "medium-high",
+        "medium" => "medium",
+        _ => "low",
+    };
+    PolicyFinding {
+        rule_id: rule_id.into(),
+        severity: severity.into(),
+        title: title.into(),
+        description,
+        node_ids,
+        evidence,
+        likelihood: likelihood.into(),
+        confidence: confidence.into(),
+    }
 }
 
 pub fn analyze_policy(graph: &SecurityGraph, max_depth: usize) -> Vec<PolicyFinding> {
@@ -46,37 +82,31 @@ pub fn analyze_policy(graph: &SecurityGraph, max_depth: usize) -> Vec<PolicyFind
                 let action = prop(node, "action");
                 let resource = prop(node, "resource");
                 if is_wildcard(&action) || is_wildcard(&resource) {
-                    findings.push(PolicyFinding {
-                        rule_id: "AUTH-WILDCARD".into(), severity: "high".into(),
-                        title: "Wildcard authorization grant".into(),
-                        description: format!("Permission grants broad scope: {action} on {resource}."),
-                        node_ids: vec![node.id.clone()],
-                        evidence: vec![format!("action={action}"), format!("resource={resource}")],
-                    });
+                    findings.push(finding(
+                        "AUTH-WILDCARD", "high", "Wildcard authorization grant",
+                        format!("Permission grants broad scope: {action} on {resource}."),
+                        vec![node.id.clone()], vec![format!("action={action}"), format!("resource={resource}")],
+                    ));
                 }
                 let lr = resource.to_lowercase();
                 let la = action.to_lowercase();
                 if ["write", "delete", "admin", "execute", "assume_role"].contains(&la.as_str())
                     && (lr.contains("prod") || lr.contains("production"))
                 {
-                    findings.push(PolicyFinding {
-                        rule_id: "AUTH-PROD-WRITE".into(), severity: "critical".into(),
-                        title: "Production modification authority".into(),
-                        description: format!("A principal has {action} authority over {resource}."),
-                        node_ids: vec![node.id.clone()],
-                        evidence: vec![format!("action={action}"), format!("resource={resource}")],
-                    });
+                    findings.push(finding(
+                        "AUTH-PROD-WRITE", "critical", "Production modification authority",
+                        format!("A principal has {action} authority over {resource}."),
+                        vec![node.id.clone()], vec![format!("action={action}"), format!("resource={resource}")],
+                    ));
                 }
             }
             "credential" => {
                 if prop(node, "secret").eq_ignore_ascii_case("true") && node.properties.get("source").is_some() {
-                    findings.push(PolicyFinding {
-                        rule_id: "CRED-CONFIG-EXPOSED".into(), severity: "high".into(),
-                        title: "Credential material referenced by configuration".into(),
-                        description: "A credential is represented as a configuration-backed secret.".into(),
-                        node_ids: vec![node.id.clone()],
-                        evidence: vec![format!("source={}", prop(node, "source"))],
-                    });
+                    findings.push(finding(
+                        "CRED-CONFIG-EXPOSED", "high", "Credential material referenced by configuration",
+                        "A credential is represented as a configuration-backed secret.".into(),
+                        vec![node.id.clone()], vec![format!("source={}", prop(node, "source"))],
+                    ));
                 }
             }
             "tool" => {
@@ -85,32 +115,38 @@ pub fn analyze_policy(graph: &SecurityGraph, max_depth: usize) -> Vec<PolicyFind
                 if ["execute", "delete", "assume_role", "admin", "write"].iter().any(|x| operation.contains(x))
                     || ["shell", "execute", "arbitrary command"].iter().any(|x| description.contains(x))
                 {
-                    findings.push(PolicyFinding {
-                        rule_id: "TOOL-DANGEROUS-CAP".into(), severity: "high".into(),
-                        title: "Dangerous tool capability".into(),
-                        description: "A tool exposes a high-impact execution or mutation capability.".into(),
-                        node_ids: vec![node.id.clone()],
-                        evidence: vec![format!("operation={operation}")],
-                    });
+                    findings.push(finding(
+                        "TOOL-DANGEROUS-CAP", "high", "Dangerous tool capability",
+                        "A tool exposes a high-impact execution or mutation capability.".into(),
+                        vec![node.id.clone()], vec![format!("operation={operation}")],
+                    ));
                 }
             }
             _ => {}
         }
     }
+
     for agent in graph.nodes.values().filter(|n| n.kind == "agent") {
-        for path in graph.reachable(&agent.id, max_depth) {
+        for path in graph.reachable_limited_mode(&agent.id, max_depth, ANALYSIS_PATH_CAP, "can") {
             let Some(target_id) = path.last() else { continue };
-            let Some(target) = graph.nodes.get(target_id) else { continue };
+            let Some(target) = graph.nodes.get(target_id) else { continue; };
             if !HIGH_IMPACT_KINDS.contains(&target.kind.as_str()) { continue; }
             let joined = path.iter().filter_map(|id| graph.nodes.get(id)).map(|n| n.name.clone()).collect::<Vec<_>>().join(" -> ");
-            let lower = joined.to_lowercase();
-            let severity = if SENSITIVE_WORDS.iter().any(|word| lower.contains(word)) { "critical" } else { "high" };
-            findings.push(PolicyFinding {
-                rule_id: "PATH-HIGH-IMPACT".into(), severity: severity.into(),
-                title: "Agent has a reachable high-impact resource".into(),
-                description: format!("The agent can traverse a graph path to {}: {}.", target.kind, target.name),
-                node_ids: path, evidence: vec![joined],
-            });
+            let (tier, reason) = resource_tier(target);
+            let severity = match tier.as_str() {
+                "critical" => "critical",
+                "high" => "high",
+                _ => "medium",
+            };
+            let mut evidence = vec![joined.clone(), format!("sensitivity={tier}")];
+            if !reason.is_empty() { evidence.push(format!("sensitivity_reason={reason}")); }
+            findings.push(finding(
+                "PATH-HIGH-IMPACT", severity,
+                "Agent has a reachable high-impact resource",
+                format!("The agent has a CAN-qualified graph path to {}: {}.", target.kind, target.name),
+                path,
+                evidence,
+            ));
         }
     }
     findings.sort_by(|a, b| (&a.rule_id, &a.node_ids).cmp(&(&b.rule_id, &b.node_ids)));
@@ -121,9 +157,9 @@ pub fn analyze_policy(graph: &SecurityGraph, max_depth: usize) -> Vec<PolicyFind
 pub fn attack_paths(graph: &SecurityGraph, max_depth: usize) -> Vec<PathResult> {
     let mut result = Vec::new();
     for agent in graph.nodes.values().filter(|n| n.kind == "agent") {
-        for path in graph.reachable(&agent.id, max_depth) {
-            let Some(target_id) = path.last() else { continue };
-            let Some(target) = graph.nodes.get(target_id) else { continue };
+        for path in graph.reachable_limited_mode(&agent.id, max_depth, ANALYSIS_PATH_CAP, "can") {
+            let Some(target_id) = path.last() else { continue; };
+            let Some(target) = graph.nodes.get(target_id) else { continue; };
             if HIGH_IMPACT_KINDS.contains(&target.kind.as_str()) {
                 result.push(PathResult { start: agent.name.clone(), target: target.name.clone(), node_ids: path });
             }
@@ -136,21 +172,28 @@ pub fn blast_radius(graph: &SecurityGraph, max_depth: usize) -> Vec<BlastRadius>
     let mut results = Vec::new();
     for agent in graph.nodes.values().filter(|n| n.kind == "agent") {
         let mut resources: std::collections::HashMap<String, ImpactedResource> = std::collections::HashMap::new();
-        for path in graph.reachable(&agent.id, max_depth) {
-            let Some(target_id) = path.last() else { continue };
-            let Some(target) = graph.nodes.get(target_id) else { continue };
+        for path in graph.reachable_limited_mode(&agent.id, max_depth, ANALYSIS_PATH_CAP, "can") {
+            let Some(target_id) = path.last() else { continue; };
+            let Some(target) = graph.nodes.get(target_id) else { continue; };
             if !HIGH_IMPACT_KINDS.contains(&target.kind.as_str()) { continue; }
+            let (tier, reason) = resource_tier(target);
             let entry = resources.entry(target.id.clone()).or_insert_with(|| ImpactedResource {
-                name: target.name.clone(), kind: target.kind.clone(), distance: usize::MAX, path_count: 0, tier: resource_tier(target),
+                name: target.name.clone(), kind: target.kind.clone(), distance: usize::MAX, path_count: 0, tier: tier.clone(), sensitivity_reason: reason.clone(),
             });
             entry.distance = entry.distance.min(path.len().saturating_sub(1));
-            entry.path_count += 1;
+            entry.path_count = entry.path_count.saturating_add(1);
         }
         let mut resources: Vec<_> = resources.into_values().collect();
         resources.sort_by(|a, b| (a.distance, &a.name).cmp(&(b.distance, &b.name)));
-        let score = resources.iter().map(|r| match r.tier.as_str() { "critical" => 35, "high" => 20, "medium" => 10, _ => 5 }).sum::<u32>().min(100);
-        let tier = if score >= 75 { "critical" } else if score >= 50 { "high" } else if score >= 25 { "medium" } else { "low" };
-        results.push(BlastRadius { agent: agent.name.clone(), score, tier: tier.into(), resources });
+
+        // This is deliberately an impact score, not a probabilistic risk score. Sensitive
+        // resources establish severity floors so a single production/secret target cannot be
+        // diluted by graph distance or by a larger number of medium targets.
+        let additive = resources.iter().map(|r| match r.tier.as_str() { "critical" => 40, "high" => 20, "medium" => 10, _ => 5 }).sum::<u32>().min(100);
+        let floor = resources.iter().map(|r| match r.tier.as_str() { "critical" => 80, "high" => 50, "medium" => 25, _ => 0 }).max().unwrap_or(0);
+        let score = additive.max(floor).min(100);
+        let tier = if score >= 80 { "critical" } else if score >= 50 { "high" } else if score >= 25 { "medium" } else { "low" };
+        results.push(BlastRadius { agent: agent.name.clone(), score, tier: tier.into(), resources, score_model: "graph-impact-v2".into() });
     }
     results
 }
@@ -163,9 +206,24 @@ fn is_wildcard(value: &str) -> bool {
     matches!(value.to_lowercase().as_str(), "*" | "all" | "any" | "admin:*" | "*:*")
 }
 
-fn resource_tier(node: &Node) -> String {
-    let value = format!("{} {}", node.kind, node.name).to_lowercase();
-    if value.contains("prod") || value.contains("production") || value.contains("secret") || value.contains("credential") { "critical".into() }
-    else if node.kind == "database" || node.kind == "deployment" || node.kind == "credential" { "high".into() }
-    else { "medium".into() }
+fn resource_tier(node: &Node) -> (String, String) {
+    if let Some(explicit) = node.properties.get("sensitivity").and_then(|v| v.as_str()) {
+        let tier = explicit.to_ascii_lowercase();
+        if matches!(tier.as_str(), "critical" | "high" | "medium" | "low") {
+            return (tier, "explicit sensitivity metadata".into());
+        }
+    }
+    match node.kind.as_str() {
+        "credential" => return ("critical".into(), "credential resource kind".into()),
+        "database" | "deployment" => {
+            let name = node.name.to_ascii_lowercase();
+            if SENSITIVE_WORDS.iter().any(|token| name.contains(token)) {
+                return ("critical".into(), format!("name heuristic matched one of: {}", SENSITIVE_WORDS.join(", ")));
+            }
+            return ("high".into(), "high-impact resource kind".into());
+        }
+        "data_source" => return ("high".into(), "data source resource kind".into()),
+        _ => {}
+    }
+    ("medium".into(), "default resource classification".into())
 }
