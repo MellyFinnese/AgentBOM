@@ -4,6 +4,27 @@ AI agent security and attack-surface intelligence.
 
 AgentBOM models autonomous AI systems as relationships between agents, models, tools, identities, credentials, capabilities, data, and deployments. The goal is to determine **what exists, what an agent can do, what authority it holds, what it can reach, what is actually happening at runtime, and what changes over time**.
 
+## Rust-native architecture
+
+AgentBOM is now **Rust-first**. The security engine is implemented once in native Rust and exposed through stable bindings:
+
+```text
+                           AgentBOM
+                              |
+                       Rust Security Engine
+                              |
+             +----------------+----------------+
+             |                |                |
+          Python             C ABI            WASM* 
+          / CLI              / FFI
+             |                |
+          Tooling        C/C++/Go/etc.
+```
+
+`agentbom-core` contains graph primitives. `agentbom-engine` is the stable native API. `agentbom-ffi` publishes the C ABI, and `agentbom-python` exposes the same engine through PyO3. Security-critical graph operations are not reimplemented in Python.
+
+The Rust workspace is tested and built independently by CI, including the C FFI artifact.
+
 ## Current vertical slice
 
 AgentBOM can inspect an MCP-style JSON manifest without executing the configured server:
@@ -58,38 +79,33 @@ Drift is reported as added/removed/changed entities and added/removed relationsh
                 +---------+--------+
                           |
                           v
-                +------------------+
-                |  Security Graph   |
-                +---------+--------+
-                          |
-          +---------------+---------------+
-          |               |               |
-          v               v               v
-        Risk        Authorization       Policy
-          |               |               |
-          +---------------+---------------+
-                          |
-                          v
-                     Attack Paths
-                          |
-                          v
-                     Blast Radius
-                          |
-                          v
-                Runtime Reconciliation
-                          |
-                          v
-                    Temporal Drift
-                          |
-                          v
-                       Evidence
-                          |
-                          v
-                    Reporting / CI
+                +-------------------------+
+                | Rust Security Engine     |
+                | graph / paths / policy   |
+                | blast radius / drift     |
+                +-----------+-------------+
+                            |
+             +--------------+--------------+
+             |              |              |
+             v              v              v
+        Authorization      Evidence      Bindings
+             |                            |
+             v                   +--------+--------+
+        Attack Paths             |        |        |
+             |                Python     C ABI    WASM*
+             v
+        Blast Radius
+             |
+             v
+       Reporting / CI
+
+* planned binding; not yet shipped
 ```
 
 ## Design principles
 
+- **Rust-first:** one authoritative native implementation for security-critical analysis.
+- **Stable bindings:** C ABI for broad interoperability and PyO3 for Python ergonomics.
 - **Domain-first:** the security model comes before integrations.
 - **Capability-aware:** capabilities and authorization are modeled explicitly.
 - **Authority-aware:** identity, credentials, permission grants, effects, conditions, and resource scope are first-class concepts.
@@ -104,4 +120,4 @@ Drift is reported as added/removed/changed entities and added/removed relationsh
 
 ## Status
 
-Early active development. The discovery-to-graph-to-authorization-to-policy-to-blast-radius-to-runtime-reconciliation-to-drift pipeline is now in place. Next major layers are richer IAM/API authorization ingestion, graph backends, continuous monitoring, and signed/attested baseline workflows.
+Early active development. The Rust-native graph engine, stable engine API, C FFI boundary, Python binding, discovery, authorization, policy, blast-radius, runtime reconciliation, and temporal drift foundations are in place. Next major layers are moving the remaining policy/blast-radius/drift algorithms fully into Rust, richer IAM/API authorization ingestion, graph backends, continuous monitoring, and signed/attested baseline workflows.
