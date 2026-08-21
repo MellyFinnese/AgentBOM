@@ -22,6 +22,15 @@ impl NativeGraph {
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
+    fn outgoing(&self, source: String) -> Vec<(String, String, String)> {
+        self.inner
+            .edges
+            .iter()
+            .filter(|edge| edge.source == source)
+            .map(|edge| (edge.source.clone(), edge.kind.clone(), edge.target.clone()))
+            .collect()
+    }
+
     fn reachable(&self, start: String, max_depth: usize) -> Vec<Vec<String>> {
         self.inner.reachable(&start, max_depth)
     }
