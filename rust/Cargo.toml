@@ -1,3 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["agentbom-core", "agentbom-python"]
+members = [
+  "agentbom-core",
+  "agentbom-engine",
+  "agentbom-ffi",
+  "agentbom-python",
+]
