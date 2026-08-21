@@ -69,9 +69,9 @@ impl Engine {
     pub fn correlated_security_paths(&self, principal: &str, max_hops: usize, max_depth: usize) -> Vec<SecurityPath> { correlated_security_paths(&self.graph, principal, max_hops, max_depth) }
     pub fn correlated_findings(&self, principal: &str, max_hops: usize, max_depth: usize) -> Vec<CorrelatedFinding> { correlate_findings(&self.graph, principal, max_hops, max_depth) }
     pub fn correlate_behavior(&self, event: &RuntimeEvent, max_hops: usize, max_depth: usize) -> Vec<BehaviorFinding> { correlate_behavior(&self.graph, event, max_hops, max_depth) }
-    pub fn enforce_request(&self, request: &ToolRequest, rules: &[PolicyRule]) -> EnforcementDecision { EnforcementGateway.evaluate(&EnforcementGateway, self, request, rules) }
-    pub fn inspect_mcp_call(&self, call: &McpToolCall, action: &str, resource: &str, rules: &[PolicyRule]) -> McpGatewayResult { McpGateway.inspect(&McpGateway, self, call, action, resource, rules) }
-    pub fn inspect_mcp_call_with_definitions(&self, call: &McpToolCall, definitions: &[McpToolDefinition], action_override: Option<&str>, resource_override: Option<&str>, rules: &[PolicyRule]) -> McpGatewayResult { McpGateway.inspect_with_definitions(&McpGateway, self, call, definitions, action_override, resource_override, rules) }
+    pub fn enforce_request(&self, request: &ToolRequest, rules: &[PolicyRule]) -> EnforcementDecision { EnforcementGateway.evaluate(self, request, rules) }
+    pub fn inspect_mcp_call(&self, call: &McpToolCall, action: &str, resource: &str, rules: &[PolicyRule]) -> McpGatewayResult { McpGateway.inspect(self, call, action, resource, rules) }
+    pub fn inspect_mcp_call_with_definitions(&self, call: &McpToolCall, definitions: &[McpToolDefinition], action_override: Option<&str>, resource_override: Option<&str>, rules: &[PolicyRule]) -> McpGatewayResult { McpGateway.inspect_with_definitions(self, call, definitions, action_override, resource_override, rules) }
 }
 
 impl Engine {
