@@ -4,6 +4,43 @@ AI agent security and attack-surface intelligence.
 
 AgentBOM models autonomous AI systems as relationships between agents, models, tools, identities, credentials, capabilities, data, and deployments. The goal is to determine **what exists, what an agent can do, what authority it holds, what it can reach, what is actually happening at runtime, and what changes over time**.
 
+## Installation
+
+Install the published Python distribution from PyPI:
+
+```bash
+pip install agentbom-official
+```
+
+The PyPI distribution name is `agentbom-official`; the installed command remains `agentbom`:
+
+```bash
+agentbom --help
+agentbom --version
+```
+
+For a reproducible isolated environment:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install agentbom-official
+agentbom --version
+```
+
+Windows PowerShell:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install agentbom-official
+agentbom --version
+```
+
+For development from source, the package uses Maturin and requires the pinned Rust toolchain. Python-only contributors can use the documented test path in `CONTRIBUTING.md`.
+
 ## Rust-native architecture
 
 AgentBOM is **Rust-first**. The security engine is implemented once in native Rust and exposed through stable bindings:
