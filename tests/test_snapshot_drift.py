@@ -31,4 +31,4 @@ def test_drift_detects_new_sensitive_resource_and_relationship() -> None:
     findings = compare_snapshots(previous, current)
 
     assert any(f.drift_type == DriftType.ADDED_ENTITY and "production-db" in f.description for f in findings)
-    assert any(f.drift_type == DriftType.ADDED_RELATIONSHIP and f.severity == "high" for f in findings)
+    assert any(f.drift_type == DriftType.ADDED_RELATIONSHIP and f.severity == "critical" for f in findings)
