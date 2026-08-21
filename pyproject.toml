@@ -3,7 +3,7 @@ requires = ["maturin>=1.9,<2"]
 build-backend = "maturin"
 
 [project]
-name = "agentbom"
+name = "agentbom-official"
 version = "0.1.0"
 description = "AI agent security and attack-surface intelligence."
 readme = "README.md"
