@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Iterable
 
 from .domain import Entity, EntityKind
 from .graph import GraphStore
@@ -42,7 +41,12 @@ class BlastRadius:
             ImpactTier.MEDIUM: 8,
             ImpactTier.LOW: 2,
         }
-        return min(100, sum(weights[item.tier] * max(1, item.path_count) for item in self.resources))
+        additive_score = min(100, sum(weights[item.tier] * max(1, item.path_count) for item in self.resources))
+        # A reachable critical resource is a severity floor. A single direct path to
+        # production data/infrastructure must never be diluted to MEDIUM by additive scoring.
+        if any(item.tier is ImpactTier.CRITICAL for item in self.resources):
+            return max(additive_score, 80)
+        return additive_score
 
     @property
     def tier(self) -> ImpactTier:
@@ -65,12 +69,7 @@ _RESOURCE_TIERS = {
 }
 
 
-def analyze_blast_radius(
-    graph: GraphStore,
-    origin: Entity,
-    *,
-    max_depth: int = 8,
-) -> BlastRadius:
+def analyze_blast_radius(graph: GraphStore, origin: Entity, *, max_depth: int = 8) -> BlastRadius:
     """Find reachable security-relevant resources and calculate a bounded impact score."""
     max_depth = max(1, max_depth)
     queue: deque[tuple[str, int]] = deque([(origin.id, 0)])
