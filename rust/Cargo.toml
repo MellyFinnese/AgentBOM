@@ -5,4 +5,5 @@ members = [
   "agentbom-engine",
   "agentbom-ffi",
   "agentbom-python",
+  "agentbom-wasm",
 ]
