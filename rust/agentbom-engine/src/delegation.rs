@@ -157,7 +157,7 @@ mod tests {
         graph.add_node(node("deny", "permission", "deny", serde_json::json!({"principal":"b","action":"write","resource":"prod/secrets/*","effect":"deny"}))).unwrap();
         graph.add_node(node("conditional", "permission", "conditional", serde_json::json!({"principal":"b","action":"read","resource":"prod/*","effect":"allow","conditions":{"StringEquals":{"env":"prod"}}}))).unwrap();
         graph.add_edge(Edge { source: "a".into(), kind: "delegates".into(), target: "b".into(), properties: serde_json::json!({}) }).unwrap();
-        let paths = effective_authority(graph.as_ref(), "a", 4);
+        let paths = effective_authority(&graph, "a", 4);
         assert!(!paths.iter().any(|p| p.action == "read"));
         assert!(!paths.iter().any(|p| p.action == "write" && p.resource == "prod/*"));
     }
