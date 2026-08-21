@@ -13,8 +13,9 @@ agentbom scan ./mcp.json
 agentbom scan ./mcp.json --auth
 agentbom scan ./mcp.json --paths
 agentbom scan ./mcp.json --policy
-agentbom scan ./mcp.json --auth --paths --policy
-agentbom scan ./mcp.json --json --auth --paths --policy
+agentbom scan ./mcp.json --blast-radius
+agentbom scan ./mcp.json --auth --paths --policy --blast-radius
+agentbom scan ./mcp.json --json --auth --paths --policy --blast-radius
 ```
 
 Discovery normalizes declared agents, MCP servers, tools, credentials, capabilities, identities, permission grants, and resource scope into the AgentBOM graph.
@@ -27,7 +28,9 @@ The deterministic policy engine currently detects:
 - dangerous tool capabilities
 - reachable high-impact resources through graph paths
 
-Every policy finding includes a stable rule ID, severity, affected entity IDs, description, and evidence that can be rendered as JSON for CI or downstream tooling.
+The blast-radius engine then estimates what an agent can ultimately affect. It is bounded by traversal depth, classifies reachable security-relevant resources by impact tier, and produces a deterministic 0–100 score suitable for CI and reporting.
+
+Every policy finding includes a stable rule ID, severity, affected entity IDs, description, and evidence. Blast-radius results include the agent, score, overall tier, impacted resources, traversal distance, and observed path count.
 
 Example privilege chain:
 
@@ -95,11 +98,11 @@ Agent
 - **Authority-aware:** identity, credentials, permission grants, effects, conditions, and resource scope are first-class concepts.
 - **Evidence-backed:** discoveries retain source and provenance metadata.
 - **Graph-native:** relationships are part of the security model, not an enrichment step.
-- **Deterministic:** policy and path analysis are reproducible and bounded.
+- **Deterministic:** policy, path, and blast-radius analysis are reproducible and bounded.
 - **Backend-neutral:** local analysis does not require a graph database.
 - **Extensible discovery:** MCP, configuration, runtime, and cloud sources can feed the same model.
 - **Safe discovery:** configuration inspection does not execute arbitrary agent or MCP code.
 
 ## Status
 
-Early active development. The first discovery-to-graph-to-authorization-to-policy pipeline is in place. The next major layers are richer IAM/API authorization ingestion, runtime discovery, blast-radius scoring, and graph backends.
+Early active development. The discovery-to-graph-to-authorization-to-policy-to-blast-radius pipeline is now in place. The next major layers are richer IAM/API authorization ingestion, runtime discovery, graph backends, and continuous monitoring.
