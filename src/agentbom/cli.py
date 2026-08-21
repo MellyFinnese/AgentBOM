@@ -9,7 +9,7 @@ from .discovery_mcp import MCPConfigSource, discover_mcp_config
 from .domain import EntityKind
 from .graph import InMemoryGraph
 from .native_bridge import attack_paths, blast_radius, drift_findings, policy_findings
-from .native_bridge_extended import create_attestation, enforcement_decision, export_cypher, parse_authorization, runtime_monitor_json, sign_attestation
+from .native_bridge_extended import create_attestation, delegation_findings, effective_authority, enforcement_decision, export_cypher, parse_authorization, runtime_monitor_json, sign_attestation
 from .reconcile import reconcile_runtime
 from .runtime import discover_local_runtime
 from .snapshot import load_snapshot, save_snapshot, snapshot_graph, verify_snapshot
@@ -26,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--save-baseline", type=Path); scan.add_argument("--compare-baseline", type=Path); scan.add_argument("--max-depth", type=int, default=8)
     auth = sub.add_parser("auth-parse", help="Normalize provider authorization JSON with Rust")
     auth.add_argument("provider", choices=["aws-iam","gcp-iam","azure-rbac","kubernetes-rbac","oauth","mcp"]); auth.add_argument("policy", type=Path)
+    authority = sub.add_parser("authority", help="Resolve effective authority through delegation")
+    authority.add_argument("target", type=Path); authority.add_argument("principal"); authority.add_argument("--max-hops", type=int, default=8); authority.add_argument("--findings", action="store_true")
+    spec = sub.add_parser("spec", help="Emit an AgentBOM v1 document")
+    spec.add_argument("target", type=Path); spec.add_argument("--output", type=Path)
     mon = sub.add_parser("monitor", help="Analyze runtime events with the Rust monitoring engine")
     mon.add_argument("events", type=Path); mon.add_argument("--declared", type=Path, required=True)
     cy = sub.add_parser("cypher", help="Export a discovered graph as parameterized Cypher statements")
@@ -59,10 +63,23 @@ def _auth_chains(graph: InMemoryGraph) -> list[dict[str, object]]:
                         chains.append({"agent":agent.name,"identity":identity.name,"credential":credential.name,"permission":permission.name,"resource":resource.name})
     return chains
 
+def _agentbom_document(graph: InMemoryGraph, observations: tuple[object, ...]) -> dict[str, object]:
+    return {
+        "schema_version": "1.0",
+        "document": {"id": f"agentbom-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}", "created_at": datetime.now(timezone.utc).isoformat(), "engine_version": __version__},
+        "entities": [{"id":e.id,"kind":e.kind.value,"name":e.name,"properties":dict(e.properties)} for e in graph.entities.values()],
+        "relationships": [{"source":r.source_id,"kind":r.kind.value,"target":r.target_id,"properties":dict(r.properties)} for r in graph.relationships],
+        "evidence": [{"id":f"obs-{i}","source":"discovery","message":o.message} for i,o in enumerate(observations, 1)],
+    }
+
 def main() -> int:
     args=build_parser().parse_args()
     if args.command == "info": print("AgentBOM: Rust-native agent security engine"); return 0
     if args.command == "auth-parse": print(json.dumps(parse_authorization(args.provider, args.policy.read_text(encoding="utf-8")), indent=2)); return 0
+    if args.command == "authority":
+        graph,_=_scan(args.target); result = delegation_findings(graph,args.principal,args.max_hops) if args.findings else effective_authority(graph,args.principal,args.max_hops); print(json.dumps(result, indent=2)); return 0
+    if args.command == "spec":
+        graph,observations=_scan(args.target); payload=json.dumps(_agentbom_document(graph,observations), indent=2, sort_keys=True); args.output.write_text(payload+"\n", encoding="utf-8") if args.output else print(payload); return 0
     if args.command == "monitor":
         declared=json.loads(args.declared.read_text(encoding="utf-8")); events=json.loads(args.events.read_text(encoding="utf-8")); print(json.dumps(runtime_monitor_json(declared, events), indent=2)); return 0
     if args.command == "cypher":
@@ -79,7 +96,7 @@ def main() -> int:
         if args.blast_radius: payload["blast_radius"]=blast_radius(graph,args.max_depth)
         if args.runtime:
             rr=discover_local_runtime(include_connections=args.runtime_network); payload["runtime"]={"entities":[{"id":e.id,"kind":e.kind.value,"name":e.name,"properties":dict(e.properties)} for e in rr.entities],"observations":[o.message for o in rr.observations]}
-            if args.reconcile: payload["runtime_findings"]=runtime_monitor_json([e.name for e in graph.entities.values()], [ {"agent_id":"local","event_type":"runtime.observation","target":e.name,"timestamp_ms":0,"metadata":{}} for e in rr.entities ])
+            if args.reconcile: payload["runtime_findings"]=runtime_monitor_json([e.name for e in graph.entities.values()], [{"agent_id":"local","event_type":"runtime.observation","target":e.name,"timestamp_ms":0,"metadata":{}} for e in rr.entities])
         if args.save_baseline:
             snap=snapshot_graph(graph); save_snapshot(snap,args.save_baseline); payload["baseline"]={"digest":snap.digest,"verified":verify_snapshot(snap)}
         if args.compare_baseline: payload["drift"]=drift_findings(graph,load_snapshot(args.compare_baseline))
