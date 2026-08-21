@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Node {
     pub id: String,
     pub kind: String,
@@ -11,7 +11,7 @@ pub struct Node {
     pub properties: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Edge {
     pub source: String,
     pub kind: String,
@@ -27,9 +27,7 @@ pub struct SecurityGraph {
 }
 
 impl SecurityGraph {
-    pub fn add_node(&mut self, node: Node) {
-        self.nodes.insert(node.id.clone(), node);
-    }
+    pub fn add_node(&mut self, node: Node) { self.nodes.insert(node.id.clone(), node); }
 
     pub fn add_edge(&mut self, edge: Edge) -> Result<(), String> {
         if !self.nodes.contains_key(&edge.source) || !self.nodes.contains_key(&edge.target) {
@@ -47,13 +45,9 @@ impl SecurityGraph {
         let mut queue = VecDeque::from([(start.to_owned(), vec![start.to_owned()])]);
         let mut paths = Vec::new();
         while let Some((current, path)) = queue.pop_front() {
-            if path.len().saturating_sub(1) >= max_depth {
-                continue;
-            }
+            if path.len().saturating_sub(1) >= max_depth { continue; }
             for edge in self.outgoing(&current) {
-                if path.contains(&edge.target) {
-                    continue;
-                }
+                if path.contains(&edge.target) { continue; }
                 let mut next = path.clone();
                 next.push(edge.target.clone());
                 paths.push(next.clone());
@@ -72,17 +66,26 @@ impl SecurityGraph {
         format!("{:x}", Sha256::digest(payload))
     }
 
-    pub fn diff(&self, other: &Self) -> GraphDiff {
-        let self_nodes: HashSet<_> = self.nodes.values().collect();
-        let other_nodes: HashSet<_> = other.nodes.values().collect();
-        let self_edges: HashSet<_> = self.edges.iter().collect();
-        let other_edges: HashSet<_> = other.edges.iter().collect();
-        GraphDiff {
-            added_nodes: other_nodes.difference(&self_nodes).cloned().cloned().collect(),
-            removed_nodes: self_nodes.difference(&other_nodes).cloned().cloned().collect(),
-            added_edges: other_edges.difference(&self_edges).cloned().cloned().collect(),
-            removed_edges: self_edges.difference(&other_edges).cloned().cloned().collect(),
+    pub fn diff(&self, current: &Self) -> GraphDiff {
+        let baseline_ids: HashSet<&str> = self.nodes.keys().map(String::as_str).collect();
+        let current_ids: HashSet<&str> = current.nodes.keys().map(String::as_str).collect();
+        let mut added_nodes = Vec::new();
+        let mut removed_nodes = Vec::new();
+        for (id, node) in &current.nodes {
+            if !baseline_ids.contains(id.as_str()) { added_nodes.push(node.clone()); }
         }
+        for (id, node) in &self.nodes {
+            if !current_ids.contains(id.as_str()) { removed_nodes.push(node.clone()); }
+        }
+
+        let baseline_edges: HashSet<(&str, &str, &str)> = self.edges.iter().map(|e| (e.source.as_str(), e.kind.as_str(), e.target.as_str())).collect();
+        let current_edges: HashSet<(&str, &str, &str)> = current.edges.iter().map(|e| (e.source.as_str(), e.kind.as_str(), e.target.as_str())).collect();
+        let added_edges = current.edges.iter().filter(|e| !baseline_edges.contains(&(e.source.as_str(), e.kind.as_str(), e.target.as_str()))).cloned().collect();
+        let removed_edges = self.edges.iter().filter(|e| !current_edges.contains(&(e.source.as_str(), e.kind.as_str(), e.target.as_str()))).cloned().collect();
+
+        added_nodes.sort_by(|a, b| a.id.cmp(&b.id));
+        removed_nodes.sort_by(|a, b| a.id.cmp(&b.id));
+        GraphDiff { added_nodes, removed_nodes, added_edges, removed_edges }
     }
 }
 
@@ -98,9 +101,7 @@ pub struct GraphDiff {
 mod tests {
     use super::*;
 
-    fn node(id: &str, kind: &str, name: &str) -> Node {
-        Node { id: id.into(), kind: kind.into(), name: name.into(), properties: serde_json::json!({}) }
-    }
+    fn node(id: &str, kind: &str, name: &str) -> Node { Node { id: id.into(), kind: kind.into(), name: name.into(), properties: serde_json::json!({}) } }
 
     #[test]
     fn graph_is_deterministic() {
@@ -110,5 +111,16 @@ mod tests {
         graph.add_edge(Edge { source: "a".into(), kind: "accesses".into(), target: "b".into(), properties: serde_json::json!({}) }).unwrap();
         assert_eq!(graph.snapshot_hash(), graph.snapshot_hash());
         assert_eq!(graph.reachable("a", 2), vec![vec!["a".into(), "b".into()]]);
+    }
+
+    #[test]
+    fn diff_is_stable_without_hashing_json_values() {
+        let mut baseline = SecurityGraph::default();
+        baseline.add_node(node("a", "agent", "agent"));
+        let mut current = baseline.clone();
+        current.add_node(node("p", "permission", "write prod"));
+        let diff = baseline.diff(&current);
+        assert_eq!(diff.added_nodes.len(), 1);
+        assert_eq!(diff.added_nodes[0].id, "p");
     }
 }
