@@ -14,6 +14,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+          targets: wasm32-unknown-unknown
       - name: Format
         working-directory: rust
         run: cargo fmt --all -- --check
@@ -23,3 +24,6 @@ jobs:
       - name: Build C ABI
         working-directory: rust
         run: cargo build -p agentbom-ffi --release
+      - name: Build WASM
+        working-directory: rust
+        run: cargo build -p agentbom-wasm --target wasm32-unknown-unknown --release
