@@ -7,13 +7,10 @@ import json
 from pathlib import Path
 
 from . import __version__
-from .blast_radius import analyze_all_agents
 from .discovery_mcp import MCPConfigSource, discover_mcp_config
 from .domain import EntityKind
-from .drift import compare_snapshots, summarize_drift
 from .graph import InMemoryGraph
-from .path_analysis import BoundedPathAnalyzer
-from .policy import analyze_policies
+from .native_bridge import attack_paths, blast_radius, drift_findings, policy_findings
 from .reconcile import reconcile_runtime
 from .runtime import discover_local_runtime
 from .snapshot import load_snapshot, save_snapshot, snapshot_graph, verify_snapshot
@@ -27,10 +24,10 @@ def build_parser() -> argparse.ArgumentParser:
     scan = subparsers.add_parser("scan", help="Discover an AgentBOM from a project or MCP JSON manifest")
     scan.add_argument("target", type=Path)
     scan.add_argument("--json", action="store_true", dest="as_json", help="Emit normalized JSON")
-    scan.add_argument("--paths", action="store_true", help="Show reachable high-impact attack paths")
+    scan.add_argument("--paths", action="store_true", help="Show reachable high-impact attack paths (Rust)")
     scan.add_argument("--auth", action="store_true", help="Show discovered identity and authorization chains")
-    scan.add_argument("--policy", action="store_true", help="Run deterministic security policy analysis")
-    scan.add_argument("--blast-radius", action="store_true", help="Calculate reachable impact and blast-radius scores")
+    scan.add_argument("--policy", action="store_true", help="Run deterministic security policy analysis (Rust)")
+    scan.add_argument("--blast-radius", action="store_true", help="Calculate reachable impact and blast-radius scores (Rust)")
     scan.add_argument("--runtime", action="store_true", help="Inspect the current local runtime")
     scan.add_argument("--runtime-network", action="store_true", help="Include coarse local network identity observations")
     scan.add_argument("--reconcile", action="store_true", help="Compare runtime observations with declared authority")
@@ -69,41 +66,36 @@ def _authorization_chains(graph: InMemoryGraph) -> list[dict[str, object]]:
                         resource = graph.get_entity(access_rel.target_id)
                         if resource is None or resource.kind != EntityKind.DATA_SOURCE:
                             continue
-                        chains.append({"agent": agent.name, "identity": identity.name, "credential": credential.name, "permission": permission.name, "resource": resource.name, "action": permission.properties.get("action"), "effect": permission.properties.get("effect")})
+                        chains.append({
+                            "agent": agent.name, "identity": identity.name, "credential": credential.name,
+                            "permission": permission.name, "resource": resource.name,
+                            "action": permission.properties.get("action"), "effect": permission.properties.get("effect"),
+                        })
     return chains
 
 
-def _path_records(graph: InMemoryGraph, max_depth: int) -> list[dict[str, object]]:
-    analyzer = BoundedPathAnalyzer(max_depth=max(1, max_depth))
-    paths: list[dict[str, object]] = []
-    for agent in (e for e in graph.entities.values() if e.kind == EntityKind.AGENT):
-        for path in analyzer.find_high_impact_paths(graph, agent):
-            paths.append({"start": agent.name, "entities": [graph.get_entity(entity_id).name for entity_id in path.entity_ids if graph.get_entity(entity_id)], "relations": [kind.value for kind in path.relation_kinds]})
-    return paths
-
-
-def _blast_radius_records(graph: InMemoryGraph, max_depth: int) -> list[dict[str, object]]:
-    records: list[dict[str, object]] = []
-    for radius in analyze_all_agents(graph, max_depth=max_depth):
-        records.append({"agent": radius.origin_name, "score": radius.score, "tier": radius.tier.value, "resources": [{"name": resource.name, "kind": resource.kind.value, "tier": resource.tier.value, "distance": resource.distance, "path_count": resource.path_count} for resource in radius.resources]})
-    return records
+def _native_drift(graph: InMemoryGraph, baseline_path: Path) -> list[dict[str, object]]:
+    baseline = load_snapshot(baseline_path)
+    if not verify_snapshot(baseline):
+        raise ValueError(f"Refusing unverified baseline: {baseline_path}")
+    return drift_findings(graph, baseline)
 
 
 def main() -> int:
     args = build_parser().parse_args()
     if args.command == "info":
-        print("AgentBOM: discovery -> graph -> authorization -> policy -> runtime -> blast radius -> drift")
+        print("AgentBOM: discovery -> Rust graph -> authorization -> policy -> paths -> blast radius -> drift")
         return 0
     if args.command == "scan":
         graph, observations = _scan(args.target)
         authorization = _authorization_chains(graph) if args.auth else None
-        paths = _path_records(graph, args.max_depth) if args.paths else None
-        findings = analyze_policies(graph, max_depth=args.max_depth) if args.policy else None
-        blast = _blast_radius_records(graph, args.max_depth) if args.blast_radius else None
+        paths = attack_paths(graph, args.max_depth) if args.paths else None
+        findings = policy_findings(graph, args.max_depth) if args.policy else None
+        blast = blast_radius(graph, args.max_depth) if args.blast_radius else None
         runtime_result = discover_local_runtime(include_connections=args.runtime_network) if args.runtime else None
         runtime_findings = reconcile_runtime(graph, runtime_result.entities) if args.runtime and args.reconcile else None
         current_snapshot = snapshot_graph(graph) if (args.save_baseline or args.compare_baseline) else None
-        drift = compare_snapshots(load_snapshot(args.compare_baseline), current_snapshot) if args.compare_baseline and current_snapshot else None
+        drift = _native_drift(graph, args.compare_baseline) if args.compare_baseline else None
 
         if args.save_baseline and current_snapshot is not None:
             save_snapshot(current_snapshot, args.save_baseline)
@@ -113,36 +105,39 @@ def main() -> int:
                 "entities": [{"id": e.id, "kind": e.kind.value, "name": e.name, "properties": dict(e.properties)} for e in graph.entities.values()],
                 "relationships": [{"source": r.source_id, "kind": r.kind.value, "target": r.target_id, "properties": dict(r.properties)} for r in graph.relationships],
                 "observations": [o.message for o in observations],
+                "analysis_engine": "rust",
             }
             if current_snapshot is not None:
                 payload["snapshot"] = {"created_at": current_snapshot.created_at, "digest": current_snapshot.digest, "verified": verify_snapshot(current_snapshot)}
             if authorization is not None: payload["authorization"] = authorization
             if paths is not None: payload["attack_paths"] = paths
-            if findings is not None: payload["policy_findings"] = [{"rule_id": f.rule_id, "severity": f.severity.value, "title": f.title, "description": f.description, "entity_ids": list(f.entity_ids), "evidence": list(f.evidence)} for f in findings]
+            if findings is not None: payload["policy_findings"] = findings
             if blast is not None: payload["blast_radius"] = blast
-            if runtime_result is not None: payload["runtime"] = {"entities": [{"id": e.id, "kind": e.kind.value, "name": e.name, "properties": dict(e.properties)} for e in runtime_result.entities], "observations": [o.message for o in runtime_result.observations]}
-            if runtime_findings is not None: payload["runtime_findings"] = [{"rule_id": f.rule_id, "severity": f.severity, "title": f.title, "description": f.description, "entity_ids": list(f.entity_ids)} for f in runtime_findings]
-            if drift is not None: payload["drift"] = {"summary": summarize_drift(drift), "findings": [{"type": f.drift_type.value, "severity": f.severity, "title": f.title, "description": f.description, "key": f.key} for f in drift]}
+            if runtime_result is not None:
+                payload["runtime"] = {"entities": [{"id": e.id, "kind": e.kind.value, "name": e.name, "properties": dict(e.properties)} for e in runtime_result.entities], "observations": [o.message for o in runtime_result.observations]}
+            if runtime_findings is not None:
+                payload["runtime_findings"] = [{"rule_id": f.rule_id, "severity": f.severity, "title": f.title, "description": f.description, "entity_ids": list(f.entity_ids)} for f in runtime_findings]
+            if drift is not None: payload["drift"] = drift
             print(json.dumps(payload, indent=2, default=str))
         else:
             print(f"Entities: {len(graph.entities)}")
             print(f"Relationships: {len(graph.relationships)}")
+            print("Analysis engine: Rust")
             for observation in observations: print(f"Observation: {observation.message}")
             if args.save_baseline and current_snapshot is not None: print(f"Baseline saved: {args.save_baseline} ({current_snapshot.digest[:12]})")
-            if args.compare_baseline and drift is not None:
-                summary = summarize_drift(drift)
-                print(f"Drift: {summary['total']} changes (high={summary['counts']['high']}, medium={summary['counts']['medium']}, low={summary['counts']['low']})")
-                for item in drift: print(f"[{item.severity.upper()}] {item.drift_type.value}: {item.title} — {item.description}")
+            if drift is not None:
+                print(f"Drift findings: {len(drift)}")
+                for item in drift: print(f"[{item['severity'].upper()}] {item['drift_type']}: {item['title']} — {item['description']}")
             if authorization is not None:
                 for chain in authorization: print("Authorization: " + " -> ".join(map(str, [chain["agent"], chain["identity"], chain["credential"], chain["permission"], chain["resource"]])))
             if paths is not None:
-                for path in paths: print(f"Attack path: {' -> '.join(path['entities'])}")
+                for path in paths: print(f"Attack path: {' -> '.join(path['node_ids'])} ({path['start']} -> {path['target']})")
             if findings is not None:
                 print(f"Policy findings: {len(findings)}")
-                for finding in findings: print(f"[{finding.severity.value.upper()}] {finding.rule_id}: {finding.title}\n  {finding.description}\n  Evidence: {'; '.join(finding.evidence)}")
+                for finding in findings: print(f"[{finding['severity'].upper()}] {finding['rule_id']}: {finding['title']}\n  {finding['description']}\n  Evidence: {'; '.join(finding['evidence'])}")
             if blast is not None:
                 for item in blast:
-                    print(f"Blast radius: {item['agent']} score={item['score']} tier={str(item['tier']).upper()}")
+                    print(f"Blast radius: {item['agent']} score={item['score']} tier={item['tier'].upper()}")
                     for resource in item["resources"]: print(f"  {resource['tier'].upper()}: {resource['name']} ({resource['kind']}, distance={resource['distance']}, paths={resource['path_count']})")
             if runtime_result is not None:
                 for entity in runtime_result.entities: print(f"Runtime: {entity.kind.value} {entity.name}")
