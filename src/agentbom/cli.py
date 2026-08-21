@@ -20,6 +20,7 @@ from .native_bridge_extended import (
     enforcement_decision,
     export_cypher,
     inspect_mcp_call,
+    inspect_mcp_call_with_definitions,
     parse_authorization,
     runtime_monitor_json,
     sign_attestation,
@@ -76,8 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     mcp = sub.add_parser("mcp-gateway", help="Inspect an MCP tool call through the native enforcement gateway without executing it")
     mcp.add_argument("target", type=Path)
     mcp.add_argument("request", type=Path, help="MCP tool-call envelope JSON")
-    mcp.add_argument("--action", required=True, help="Normalized action for the policy engine")
-    mcp.add_argument("--resource", required=True, help="Normalized resource for the policy engine")
+    mcp.add_argument("--tool-definitions", type=Path, help="MCP tools/list-style JSON array used to resolve action/resource context")
+    mcp.add_argument("--action", help="Explicit normalized action override")
+    mcp.add_argument("--resource", help="Explicit normalized resource override")
     mcp.add_argument("--rules", type=Path, required=True)
     mcp.add_argument("--fail-on-deny", action="store_true", help="Return non-zero unless the gateway allows forwarding")
 
@@ -145,7 +147,8 @@ def main() -> int:
         return 0
     if args.command == "behavior-check":
         graph, _ = _scan(args.target)
-        findings = json.loads(json.dumps(__import__("agentbom.native_bridge_extended", fromlist=["correlate_behavior"]).correlate_behavior(graph, _load_events(args.events), args.max_hops, args.max_depth)))
+        from .native_bridge_extended import correlate_behavior
+        findings = correlate_behavior(graph, _load_events(args.events), args.max_hops, args.max_depth)
         payload = {"analysis_engine": "rust", "findings": findings, "high_or_critical": sum(str(f.get("severity", "")).lower() in {"high", "critical"} for f in findings)}
         print(json.dumps(payload if args.as_json else findings, indent=2, default=str))
         return _risk_exit(findings) if args.fail_on_risk else 0
@@ -175,7 +178,15 @@ def main() -> int:
         graph, _ = _scan(args.target)
         request = json.loads(args.request.read_text(encoding="utf-8"))
         rules = json.loads(args.rules.read_text(encoding="utf-8"))
-        result = inspect_mcp_call(graph, request, args.action, args.resource, rules)
+        if args.tool_definitions:
+            definitions = json.loads(args.tool_definitions.read_text(encoding="utf-8"))
+            if not isinstance(definitions, list):
+                raise ValueError("tool definitions file must contain a JSON array")
+            result = inspect_mcp_call_with_definitions(graph, request, definitions, rules, args.action, args.resource)
+        else:
+            if not args.action or not args.resource:
+                raise ValueError("--action and --resource are required unless --tool-definitions is provided")
+            result = inspect_mcp_call(graph, request, args.action, args.resource, rules)
         print(json.dumps({"analysis_engine": "rust", **result}, indent=2, default=str))
         if args.fail_on_deny and not result.get("forward", False):
             return 1
