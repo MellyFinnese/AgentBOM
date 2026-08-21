@@ -8,6 +8,11 @@ def parse_authorization(provider: str, payload: str) -> list[dict[str, Any]]:
     native = _require_native()()
     return json.loads(native.parse_authorization_json(provider.strip().lower().replace("_", "-"), payload))["permissions"]
 
+def parse_mcp_tools(payload: str) -> dict[str, Any]:
+    """Parse an MCP tools/list response through the Rust engine."""
+    native = _require_native()()
+    return json.loads(native.parse_mcp_tools_json(payload))
+
 def runtime_monitor_json(declared_targets: list[str], events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     native = _require_native()()
     return json.loads(native.monitor_runtime_json(json.dumps(declared_targets), json.dumps(events)))
