@@ -1,0 +1,14 @@
+[package]
+name = "agentbom-wasm"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "WebAssembly binding for the AgentBOM native security engine"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+agentbom-engine = { path = "../agentbom-engine" }
+serde-wasm-bindgen = "0.6"
+wasm-bindgen = "0.2"
