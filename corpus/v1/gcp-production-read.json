@@ -1,0 +1,9 @@
+{
+  "case_id": "gcp-production-read",
+  "provider": "gcp",
+  "class": "vulnerable",
+  "description": "Agent can read rows from a production BigQuery dataset.",
+  "input": {"principal": "agent-sa", "role": "roles/bigquery.dataViewer", "resource": "projects/production/datasets/customer"},
+  "expected_findings": ["AGENTBOM-AUTH-SENSITIVE-READ"],
+  "expected_behavior": "deny-or-review"
+}
