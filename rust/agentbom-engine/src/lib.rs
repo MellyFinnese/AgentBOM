@@ -18,13 +18,12 @@ pub mod runtime;
 pub mod signing;
 
 use analysis::{analyze_policy, attack_paths, blast_radius, BlastRadius, PathResult, PolicyFinding};
-use delegation::{delegation_findings, effective_authority, AuthorityFinding, AuthorityPath};
 use drift::{analyze_drift, DriftFinding};
 pub use adapters::{AuthorizationAdapter, AZURE_RBAC, AWS_IAM, GCP_IAM, KUBERNETES_RBAC, MCP_AUTH, OAUTH_SCOPES};
 pub use attestation::Attestation;
 pub use authorization::{AuthorizationModel, Effect, Permission};
 pub use backend::{GraphBackend, JsonBackend};
-pub use delegation::{AuthorityFinding, AuthorityPath};
+pub use delegation::{delegation_findings, effective_authority, AuthorityFinding, AuthorityPath};
 pub use enforcement::{Decision, PolicyDecision, PolicyRule};
 pub use graph_backend::{CypherExporter, CypherStatement, GraphTransport, MemgraphTransport, Neo4jTransport};
 pub use monitoring::{MonitoringReport, RuntimeSession};
