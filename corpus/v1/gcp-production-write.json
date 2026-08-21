@@ -1,0 +1,9 @@
+{
+  "case_id": "gcp-production-write",
+  "provider": "gcp",
+  "class": "vulnerable",
+  "description": "Agent can mutate a production Cloud SQL instance through an editor-level grant.",
+  "input": {"principal": "agent-sa", "role": "roles/editor", "resource": "projects/production/instances/main"},
+  "expected_findings": ["AGENTBOM-AUTH-PRODUCTION-WRITE"],
+  "expected_behavior": "deny-or-review"
+}
