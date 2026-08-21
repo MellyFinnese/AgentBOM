@@ -3,19 +3,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod analysis;
+pub mod drift;
 use analysis::{analyze_policy, attack_paths, blast_radius, BlastRadius, PathResult, PolicyFinding};
+use drift::{analyze_drift, DriftFinding};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Engine {
-    graph: SecurityGraph,
-}
+pub struct Engine { graph: SecurityGraph }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EngineSummary {
-    pub node_count: usize,
-    pub edge_count: usize,
-    pub snapshot_hash: String,
-}
+pub struct EngineSummary { pub node_count: usize, pub edge_count: usize, pub snapshot_hash: String }
 
 impl Engine {
     pub fn new() -> Self { Self::default() }
@@ -31,6 +27,7 @@ impl Engine {
     pub fn policy_findings(&self, max_depth: usize) -> Vec<PolicyFinding> { analyze_policy(&self.graph, max_depth) }
     pub fn attack_paths(&self, max_depth: usize) -> Vec<PathResult> { attack_paths(&self.graph, max_depth) }
     pub fn blast_radius(&self, max_depth: usize) -> Vec<BlastRadius> { blast_radius(&self.graph, max_depth) }
+    pub fn drift_findings(&self, baseline: &Engine) -> Vec<DriftFinding> { analyze_drift(&self.graph, &baseline.graph) }
 }
 
 #[cfg(test)]
@@ -62,5 +59,14 @@ mod tests {
         let engine = sample();
         let restored = Engine::import_json(&engine.export_json().unwrap()).unwrap();
         assert_eq!(engine.snapshot_hash(), restored.snapshot_hash());
+    }
+
+    #[test]
+    fn drift_detects_new_permission() {
+        let baseline = sample();
+        let mut current = baseline.clone();
+        current.add_node(Node { id: "new-permission".into(), kind: "permission".into(), name: "admin production".into(), properties: json!({"action":"admin","resource":"production"}) });
+        let findings = current.drift_findings(&baseline);
+        assert!(findings.iter().any(|f| f.severity == "high" && f.key == "new-permission"));
     }
 }
