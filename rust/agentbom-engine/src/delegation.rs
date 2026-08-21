@@ -64,6 +64,7 @@ pub fn effective_authority(graph: &SecurityGraph, principal: &str, max_hops: usi
     for p in principals {
         for permission in model.permissions.iter().filter(|permission| permission.principal == p || permission.principal == "*") {
             if permission.effect == Effect::Deny { continue; }
+            if shadowed_by_overlapping_deny(&model, permission) { continue; }
             let decision = model.evaluate(&p, &permission.action, &permission.resource, &HashMap::new());
             if !matches!(decision, AuthorizationDecision::Allow) { continue; }
             let path = graph_path_for_principal(graph, principal, &p, max_hops);
@@ -79,6 +80,23 @@ pub fn effective_authority(graph: &SecurityGraph, principal: &str, max_hops: usi
         }
     }
     authority
+}
+
+fn shadowed_by_overlapping_deny(model: &AuthorizationModel, allow: &Permission) -> bool {
+    model.permissions.iter().any(|deny| {
+        deny.effect == Effect::Deny
+            && (deny.principal == allow.principal || deny.principal == "*")
+            && patterns_overlap(&deny.action, &allow.action)
+            && patterns_overlap(&deny.resource, &allow.resource)
+            && (deny.conditions.is_null() || deny.conditions.as_object().is_some_and(|o| o.is_empty()))
+    })
+}
+
+fn patterns_overlap(a: &str, b: &str) -> bool {
+    if a == "*" || b == "*" || a.eq_ignore_ascii_case(b) { return true; }
+    let a_prefix = a.split(['*', '?']).next().unwrap_or(a);
+    let b_prefix = b.split(['*', '?']).next().unwrap_or(b);
+    a_prefix.starts_with(b_prefix) || b_prefix.starts_with(a_prefix)
 }
 
 pub fn delegation_findings(graph: &SecurityGraph, principal: &str, max_hops: usize) -> Vec<AuthorityFinding> {
@@ -139,8 +157,8 @@ mod tests {
         graph.add_node(node("deny", "permission", "deny", serde_json::json!({"principal":"b","action":"write","resource":"prod/secrets/*","effect":"deny"}))).unwrap();
         graph.add_node(node("conditional", "permission", "conditional", serde_json::json!({"principal":"b","action":"read","resource":"prod/*","effect":"allow","conditions":{"StringEquals":{"env":"prod"}}}))).unwrap();
         graph.add_edge(Edge { source: "a".into(), kind: "delegates".into(), target: "b".into(), properties: serde_json::json!({}) }).unwrap();
-        let paths = effective_authority(&graph, "a", 4);
-        assert!(paths.iter().any(|p| p.action == "write" && p.resource == "prod/*"));
+        let paths = effective_authority(graph.as_ref(), "a", 4);
         assert!(!paths.iter().any(|p| p.action == "read"));
+        assert!(!paths.iter().any(|p| p.action == "write" && p.resource == "prod/*"));
     }
 }
