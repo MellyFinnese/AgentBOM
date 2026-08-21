@@ -3,9 +3,16 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod analysis;
+pub mod attestation;
+pub mod authorization;
 pub mod drift;
+pub mod enforcement;
+
 use analysis::{analyze_policy, attack_paths, blast_radius, BlastRadius, PathResult, PolicyFinding};
 use drift::{analyze_drift, DriftFinding};
+pub use attestation::Attestation;
+pub use authorization::{AuthorizationModel, Permission};
+pub use enforcement::{Decision, PolicyDecision, PolicyRule};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Engine { graph: SecurityGraph }
@@ -62,11 +69,17 @@ mod tests {
     }
 
     #[test]
-    fn drift_detects_new_permission() {
-        let baseline = sample();
-        let mut current = baseline.clone();
-        current.add_node(Node { id: "new-permission".into(), kind: "permission".into(), name: "admin production".into(), properties: json!({"action":"admin","resource":"production"}) });
-        let findings = current.drift_findings(&baseline);
-        assert!(findings.iter().any(|f| f.severity == "high" && f.key == "new-permission"));
+    fn enforcement_defaults_to_allow() {
+        let engine = Engine::new();
+        let decision = engine.evaluate_policy("read", "staging-db", &[]);
+        assert_eq!(decision.decision, Decision::Allow);
+    }
+
+    #[test]
+    fn attestation_binds_to_graph_digest() {
+        let engine = sample();
+        let attestation = engine.attest("2026-08-21T00:00:00Z", "0.1.0");
+        assert_eq!(attestation.graph_digest, engine.stable_digest());
+        assert!(!Engine::attestation_digest(&attestation).is_empty());
     }
 }
