@@ -27,6 +27,13 @@ pub struct McpToolDefinition {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct McpToolsList {
+    pub tools: Vec<McpToolDefinition>,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct McpGatewayResult {
     pub request: McpToolCall,
     pub enforcement: EnforcementDecision,
@@ -41,6 +48,21 @@ pub struct McpGatewayResult {
 pub struct McpGateway;
 
 impl McpGateway {
+    pub fn parse_tools_list(payload: &str) -> Result<McpToolsList, String> {
+        let value: serde_json::Value = serde_json::from_str(payload).map_err(|err| format!("invalid MCP tools/list JSON: {err}"))?;
+        let tools_value = value
+            .get("tools")
+            .cloned()
+            .or_else(|| value.get("result").and_then(|result| result.get("tools")).cloned())
+            .ok_or_else(|| "MCP tools/list response missing tools array".to_string())?;
+        let tools = tools_value.as_array().ok_or_else(|| "MCP tools/list tools must be an array".to_string())?;
+        let definitions = tools.iter().map(parse_tool_definition).collect::<Result<Vec<_>, _>>()?;
+        let next_cursor = value.get("nextCursor").and_then(|value| value.as_str()).map(ToOwned::to_owned)
+            .or_else(|| value.get("next_cursor").and_then(|value| value.as_str()).map(ToOwned::to_owned))
+            .or_else(|| value.get("result").and_then(|result| result.get("nextCursor")).and_then(|value| value.as_str()).map(ToOwned::to_owned));
+        Ok(McpToolsList { tools: definitions, next_cursor })
+    }
+
     pub fn inspect(&self, engine: &Engine, call: &McpToolCall, action: &str, resource: &str, rules: &[PolicyRule]) -> McpGatewayResult {
         self.inspect_resolved(engine, call, action.to_string(), resource.to_string(), "explicit", rules)
     }
@@ -60,25 +82,16 @@ impl McpGateway {
             .map(|value| (value.to_string(), "explicit"))
             .or_else(|| definition.and_then(|item| item.default_action.clone()).map(|value| (value, "tool-definition")))
             .unwrap_or_else(|| (infer_action(call, definition), "inferred"));
-
         let (resource, resource_source) = resource_override
             .filter(|value| !value.is_empty())
             .map(|value| (value.to_string(), "explicit"))
             .or_else(|| definition.and_then(|item| item.default_resource.clone()).map(|value| (value, "tool-definition")))
             .unwrap_or_else(|| (infer_resource(call, definition), "inferred"));
-
-        self.inspect_resolved(engine, call, action, resource, if action_source == resource_source { action_source } else { "mixed" }, rules)
+        let resolution_source = if action_source == resource_source { action_source } else { "mixed" };
+        self.inspect_resolved(engine, call, action, resource, resolution_source, rules)
     }
 
-    fn inspect_resolved(
-        &self,
-        engine: &Engine,
-        call: &McpToolCall,
-        action: String,
-        resource: String,
-        resolution_source: &str,
-        rules: &[PolicyRule],
-    ) -> McpGatewayResult {
+    fn inspect_resolved(&self, engine: &Engine, call: &McpToolCall, action: String, resource: String, resolution_source: &str, rules: &[PolicyRule]) -> McpGatewayResult {
         let request = ToolRequest {
             request_id: call.request_id.clone(),
             agent_id: call.agent_id.clone(),
@@ -90,22 +103,20 @@ impl McpGateway {
         };
         let enforcement = engine.enforce_request(&request, rules);
         let forward = matches!(enforcement.decision, Decision::Allow);
-        let response_status = match enforcement.decision {
-            Decision::Allow => "allow",
-            Decision::Deny => "deny",
-            Decision::RequireApproval => "require_approval",
-        }
-        .to_string();
-        McpGatewayResult {
-            request: call.clone(),
-            enforcement,
-            forward,
-            response_status,
-            resolved_action: action,
-            resolved_resource: resource,
-            resolution_source: resolution_source.to_string(),
-        }
+        let response_status = match enforcement.decision { Decision::Allow => "allow", Decision::Deny => "deny", Decision::RequireApproval => "require_approval" }.to_string();
+        McpGatewayResult { request: call.clone(), enforcement, forward, response_status, resolved_action: action, resolved_resource: resource, resolution_source: resolution_source.to_string() }
     }
+}
+
+fn parse_tool_definition(value: &serde_json::Value) -> Result<McpToolDefinition, String> {
+    let object = value.as_object().ok_or_else(|| "MCP tool definition must be an object".to_string())?;
+    let name = object.get("name").and_then(|value| value.as_str()).ok_or_else(|| "MCP tool definition missing name".to_string())?.to_string();
+    let description = object.get("description").and_then(|value| value.as_str()).map(ToOwned::to_owned);
+    let annotations = object.get("annotations").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let input_schema = object.get("inputSchema").cloned().or_else(|| object.get("input_schema").cloned()).unwrap_or_else(|| serde_json::json!({}));
+    let default_action = annotations.get("agentbom.action").and_then(|value| value.as_str()).map(ToOwned::to_owned);
+    let default_resource = annotations.get("agentbom.resource").and_then(|value| value.as_str()).map(ToOwned::to_owned);
+    Ok(McpToolDefinition { name, description, annotations, input_schema, default_action, default_resource })
 }
 
 fn infer_action(call: &McpToolCall, definition: Option<&McpToolDefinition>) -> String {
@@ -117,13 +128,9 @@ fn infer_action(call: &McpToolCall, definition: Option<&McpToolDefinition>) -> S
 
 fn infer_resource(call: &McpToolCall, definition: Option<&McpToolDefinition>) -> String {
     for key in ["resource", "target", "path", "url", "uri", "file", "destination"] {
-        if let Some(value) = call.arguments.get(key).and_then(|value| value.as_str()) {
-            if !value.is_empty() { return value.to_string(); }
-        }
+        if let Some(value) = call.arguments.get(key).and_then(|value| value.as_str()) { if !value.is_empty() { return value.to_string(); } }
     }
-    if let Some(resource) = definition.and_then(|item| item.annotations.get("resource")).and_then(|value| value.as_str()) {
-        if !resource.is_empty() { return resource.to_string(); }
-    }
+    if let Some(resource) = definition.and_then(|item| item.annotations.get("resource")).and_then(|value| value.as_str()) { if !resource.is_empty() { return resource.to_string(); } }
     "unknown".into()
 }
 
@@ -131,6 +138,21 @@ fn infer_resource(call: &McpToolCall, definition: Option<&McpToolDefinition>) ->
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parses_direct_tools_list_response() {
+        let response = json!({"tools":[{"name":"read_file","description":"Read a file","inputSchema":{"type":"object"}}],"nextCursor":"abc"});
+        let parsed = McpGateway::parse_tools_list(&response.to_string()).unwrap();
+        assert_eq!(parsed.tools[0].name, "read_file");
+        assert_eq!(parsed.next_cursor.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn parses_jsonrpc_wrapped_tools_list_response() {
+        let response = json!({"jsonrpc":"2.0","result":{"tools":[{"name":"send_email","description":"Send email","inputSchema":{"type":"object"}}]}});
+        let parsed = McpGateway::parse_tools_list(&response.to_string()).unwrap();
+        assert_eq!(parsed.tools[0].name, "send_email");
+    }
 
     #[test]
     fn deny_prevents_forwarding() {
@@ -145,14 +167,7 @@ mod tests {
     #[test]
     fn definition_and_arguments_resolve_context() {
         let engine = Engine::new();
-        let definitions = vec![McpToolDefinition {
-            name: "read_file".into(),
-            description: Some("Read a local file".into()),
-            annotations: json!({}),
-            input_schema: json!({}),
-            default_action: Some("read".into()),
-            default_resource: None,
-        }];
+        let definitions = vec![McpToolDefinition { name: "read_file".into(), description: Some("Read a local file".into()), annotations: json!({}), input_schema: json!({}), default_action: Some("read".into()), default_resource: None }];
         let call = McpToolCall { request_id: "2".into(), agent_id: "agent".into(), tool: "read_file".into(), arguments: json!({"path":"/workspace/README.md"}) };
         let result = McpGateway::default().inspect_with_definitions(&engine, &call, &definitions, None, None, &[]);
         assert_eq!(result.resolved_action, "read");
